@@ -91,6 +91,48 @@ const demoSongPresets = <SongPreset>[
     defaultMotion: LyricMotionPreset.soft,
   ),
 
+  SongPreset(
+    id: 'todokanai',
+    title: '上原れな - 届かない恋',
+    artist: '上原れな',
+    lyricAsset: 'assets/lyrics/上原玲奈 - 届かない恋 (无法传达的恋情) (249594898).json',
+    audioAsset: 'audio/上原れな - 届かない恋.flac',
+    defaultOffsetMs: 1,
+    defaultMotion: LyricMotionPreset.normal,
+  ),
+
+  SongPreset(
+    id: 'gaobaiqiqiu',
+    title: '告白气球',
+    artist: '周杰伦',
+    lyricAsset: 'assets/lyrics/gaobaiqiqiu.json',
+    audioAsset: 'audio/告白气球 - 周杰伦',
+    defaultOffsetMs: 2,
+    defaultMotion: LyricMotionPreset.normal,
+  ),
+
+  SongPreset(
+    id: 'On your mark',
+    title: '蓮ノ空女学院スクールアイドルクラブ - On your mark (104期 Ver.)',
+    artist: '蓮ノ空女学院スクールアイドルクラブ',
+    lyricAsset: 'assets/lyrics/蓮ノ空女学院スクールアイドルクラブ - On your mark (403090824).json',
+    audioAsset: 'audio/蓮ノ空女学院スクールアイドルクラブ - On your mark (403090824).flac',
+    defaultOffsetMs: 3,
+    defaultMotion: LyricMotionPreset.normal,
+  ),
+
+  SongPreset(
+    id: '余韻',
+    title: '小泉萌香 - 余韻',
+    artist: '小泉萌香',
+    lyricAsset: 'assets/lyrics/小泉萌香 - 余韻.json',
+    audioAsset: 'audio/小泉萌香 - 余韻.flac',
+    defaultOffsetMs: 4,
+    defaultMotion: LyricMotionPreset.normal,
+  ),
+
+
+
   // 以后加新歌就照着这个格式往下写：
   // SongPreset(
   //   id: 'xxx',
