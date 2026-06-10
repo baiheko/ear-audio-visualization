@@ -1,0 +1,26 @@
+[
+  {
+    "id": "ささのはに、うたかたに",
+    "title": "ささのはに、うたかたに",
+    "artist": "M・A・O,中澤ミナ,森下来奈 - ささのはに、うたかたに。 (M@STER VERSION)",
+    "lyricAsset": "assets/lyrics/日本ACG - ささのはに、うたかたに。 佐城雪美 ソロ・リミックス (403083650).json",
+    "audioAsset": "assets/audio/M・A・O,中澤ミナ,森下来奈 - ささのはに、うたかたに。 (M@STER VERSION).flac",
+    "defaultOffsetMs": 0
+  },
+  {
+    "id": "One Last Kiss",
+    "title": "One Last Kiss",
+    "artist": "宇多田光",
+    "lyricAsset": "lyrics/one.json",
+    "audioAsset": "audio/宇多田ヒカル - One Last Kiss.flac",
+    "defaultOffsetMs": 1
+  },
+  {
+    "id": "告白气球",
+    "title": "告白气球",
+    "artist": "周杰伦",
+    "lyricAsset": "lyrics/gaobaiqiqiu.json",
+    "audioAsset": "audio/告白气球 - 周杰伦.flac",
+    "defaultOffsetMs": 2
+  }
+]
