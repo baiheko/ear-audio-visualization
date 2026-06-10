@@ -704,7 +704,7 @@ class _PlayerPageState extends State<PlayerPage>
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: selected
-                          ? const Color(0xFF67D9FF).withOpacity(0.20)
+                          ? const Color(0xFF67D9FF).withValues(alpha: 0.20)
                           : const Color(0xFF172133),
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(

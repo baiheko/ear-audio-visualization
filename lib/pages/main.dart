@@ -89,7 +89,7 @@ class ModernCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => print("点击了 $title"),
+      onTap: () => debugPrint("点击了 $title"),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),

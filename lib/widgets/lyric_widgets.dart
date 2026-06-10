@@ -82,7 +82,7 @@ class LyricCharWidget extends StatelessWidget {
             ? const <Shadow>[]
             : [
                 Shadow(
-                  color: effect.color.withOpacity(0.45 * effect.glow),
+                  color: effect.color.withValues(alpha: 0.45 * effect.glow),
                   blurRadius: 16 * effect.glow,
                 ),
               ];
@@ -309,7 +309,7 @@ class LyricLineCard extends StatelessWidget {
         translateX: 0,
         translateY: 0,
         fontSize: baseFontSize * 0.98,
-        color: const Color(0xFFF3F7FF).withOpacity(0.9),
+        color: const Color(0xFFF3F7FF).withValues(alpha: 0.9),
         glow: 0.0,
       );
     }
@@ -346,7 +346,7 @@ class LyricLineCard extends StatelessWidget {
         translateX: preProgress * (2.4 * intensity),
         translateY: 0,
         fontSize: baseFontSize * (0.99 + 0.01 * preProgress),
-        color: const Color(0xFFF3F7FF).withOpacity(0.78),
+        color: const Color(0xFFF3F7FF).withValues(alpha: 0.78),
         glow: 0.0,
       );
     }
@@ -385,7 +385,7 @@ class LyricLineCard extends StatelessWidget {
       translateX: 0.0,
       translateY: 0.0,
       fontSize: baseFontSize,
-      color: const Color(0xFFF3F7FF).withOpacity(0.90),
+      color: const Color(0xFFF3F7FF).withValues(alpha: 0.90),
       glow: 0.0,
     );
   }
@@ -706,7 +706,7 @@ class ChorusProgressCard extends StatelessWidget {
                 width: 16 + weight * 8,
                 height: 16 + weight * 8,
                 decoration: BoxDecoration(
-                  color: dotColor.withOpacity(0.35 + weight * 0.65),
+                  color: dotColor.withValues(alpha: 0.35 + weight * 0.65),
                   shape: BoxShape.circle,
                 ),
               );
