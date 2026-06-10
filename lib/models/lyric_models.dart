@@ -171,6 +171,25 @@ class SongModel {
   }
 }
 
+/// 当两句歌词之间间隔较长时，用它来显示“副歌展开中”的提示。
+class ChorusGapInfo {
+  final int fromIndex;
+  final int toIndex;
+  final double gapStart;
+  final double gapEnd;
+  final double gapDuration;
+  final double progress;
+
+  ChorusGapInfo({
+    required this.fromIndex,
+    required this.toIndex,
+    required this.gapStart,
+    required this.gapEnd,
+    required this.gapDuration,
+    required this.progress,
+  });
+}
+
 /// -------------------------
 /// 下面是内部工具函数
 /// -------------------------
@@ -241,3 +260,4 @@ double _clamp(double v, double min, double max) {
   if (v > max) return max;
   return v;
 }
+

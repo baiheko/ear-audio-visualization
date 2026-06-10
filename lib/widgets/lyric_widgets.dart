@@ -2,14 +2,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../config/song_presets.dart';
 import '../models/lyric_models.dart';
 
 /// -------------------------
-/// 逐字动画所需的“视觉状态”
+/// 单个字的视觉状态
 /// -------------------------
-///
-/// 这个类不是歌词数据本身，而是“这个字在屏幕上应该长什么样”。
-/// 你后续想调动画，只要改这里的参数就行。
 class LyricCharEffect {
   final double opacity;
   final double scale;
@@ -42,7 +40,7 @@ class LyricCharEffect {
   }
 }
 
-/// 用于 TweenAnimationBuilder 的自定义 Tween。
+/// 用于 TweenAnimationBuilder 的 Tween
 class LyricCharEffectTween extends Tween<LyricCharEffect> {
   LyricCharEffectTween({
     required super.begin,
@@ -55,12 +53,7 @@ class LyricCharEffectTween extends Tween<LyricCharEffect> {
   }
 }
 
-/// 单个字的渲染组件
-///
-/// 这个组件做了三件事：
-/// 1. 逐字平滑淡入
-/// 2. 当前字轻微发光、放大、位移
-/// 3. 字的效果变化时，自动过渡，不会突然跳变
+/// 单个字组件
 class LyricCharWidget extends StatelessWidget {
   final String char;
   final LyricCharEffect beginEffect;
@@ -104,7 +97,7 @@ class LyricCharWidget extends StatelessWidget {
                 char,
                 style: TextStyle(
                   fontSize: effect.fontSize,
-                  height: 1.1,
+                  height: 1.08,
                   fontWeight: FontWeight.w700,
                   color: effect.color,
                   shadows: shadows,
@@ -118,10 +111,32 @@ class LyricCharWidget extends StatelessWidget {
   }
 }
 
+/// 长间隔信息
+class ChorusGapInfo {
+  final int fromIndex;
+  final int toIndex;
+  final double gapStart;
+  final double gapEnd;
+  final double gapDuration;
+  final double progress;
+
+  ChorusGapInfo({
+    required this.fromIndex,
+    required this.toIndex,
+    required this.gapStart,
+    required this.gapEnd,
+    required this.gapDuration,
+    required this.progress,
+  });
+}
+
 /// 逐字歌词卡片
 ///
-/// 这是你主界面里“当前唱到的那一行”。
-/// 里面每个字会按照时间逐个显现，当前字会更亮、更大、略微偏移。
+/// 这版的关键变化：
+/// 1. 字一旦出现，就不会消失
+/// 2. 当前行会一直累计显示到整行完成
+/// 3. 之前已经播完的行会作为“上一句”保留
+/// 4. pitch / volume 不再参与视觉变化
 class LyricLineCard extends StatelessWidget {
   final LyricLine line;
   final int lineIndex;
@@ -129,6 +144,19 @@ class LyricLineCard extends StatelessWidget {
   final double currentTime;
   final double beatPulse;
   final Map<String, LyricCharEffect> effectCache;
+
+  /// 当前槽位标签：上一句 / 当前歌词
+  final String slotLabel;
+
+  /// 当前行是否已经“完成并固定”
+  /// 完成态的行会整体更稳，不再继续强调当前字
+  final bool settled;
+
+  /// 预进入时间，柔和型会稍微长一点
+  final double leadInSeconds;
+
+  /// 动画风格预设
+  final LyricMotionPreset motionPreset;
 
   const LyricLineCard({
     super.key,
@@ -138,21 +166,28 @@ class LyricLineCard extends StatelessWidget {
     required this.currentTime,
     required this.beatPulse,
     required this.effectCache,
+    required this.slotLabel,
+    required this.settled,
+    required this.leadInSeconds,
+    required this.motionPreset,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // 卡片轮廓颜色：节拍到来时会稍微变亮
     final baseBorder = const Color(0xFF2B3140);
     final accentBorder = const Color(0xFF67D9FF);
-    final borderColor = Color.lerp(baseBorder, accentBorder, beatPulse * 0.55) ?? baseBorder;
+    final borderColor = Color.lerp(
+      baseBorder,
+      accentBorder,
+      beatPulse * 0.35,
+    ) ?? baseBorder;
 
     final cardBg = Color.lerp(
       const Color(0xFF0B1220),
-      const Color(0xFF11213A),
-      beatPulse * 0.25,
+      const Color(0xFF10243D),
+      beatPulse * 0.14,
     )!;
 
     final labelStyle = theme.textTheme.labelMedium?.copyWith(
@@ -173,14 +208,13 @@ class LyricLineCard extends StatelessWidget {
       final key = '${lineIndex}_$i';
 
       final effect = _buildCharEffect(
-        line: line,
         char: ch,
         currentTime: currentTime,
         baseFontSize: baseFontSize,
         beatPulse: beatPulse,
+        settled: settled,
       );
 
-      // 用缓存让 TweenAnimationBuilder 能从“上一帧状态”平滑过渡到“这一帧状态”
       final begin = effectCache[key] ?? effect;
       effectCache[key] = effect;
 
@@ -203,28 +237,19 @@ class LyricLineCard extends StatelessWidget {
         color: cardBg,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor, width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
-          ),
-        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 顶部小标签：当前行序号
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('当前', style: labelStyle),
+              Text(slotLabel, style: labelStyle),
               Text('${lineIndex + 1} / $totalLines', style: indexStyle),
             ],
           ),
           const SizedBox(height: 14),
 
-          // 逐字区域
           Center(
             child: Wrap(
               alignment: WrapAlignment.center,
@@ -234,7 +259,6 @@ class LyricLineCard extends StatelessWidget {
             ),
           ),
 
-          // 译文区域：静态双行展示，不逐字动画
           if (line.translation.trim().isNotEmpty) ...[
             const SizedBox(height: 14),
             Text(
@@ -252,8 +276,7 @@ class LyricLineCard extends StatelessWidget {
     );
   }
 
-  /// 根据字数估算基础字号。
-  /// 这是为了让长句不至于过大挤爆屏幕。
+  /// 根据字数估算基础字号，避免长句撑爆屏幕
   double _fitBaseFontSize(int charCount) {
     if (charCount <= 8) return 42;
     if (charCount <= 12) return 38;
@@ -262,28 +285,43 @@ class LyricLineCard extends StatelessWidget {
     return 26;
   }
 
-  /// 计算单字的视觉状态。
+  /// 单字视觉状态
   ///
-  /// 这里把你之前提到的效果统一编码：
-  /// - 已出现：显示
-  /// - 当前字：发光、放大、轻微位移
-  /// - pitch：控制上下浮动
-  /// - volume：控制缩放
-  /// - emotion：控制颜色偏向
+  /// 关键变化：
+  /// - 字出现后不消失
+  /// - 当前字只在“正在唱”的区间里更亮、更强调
+  /// - 一旦字出现，后面就保持显示
+  /// - 取消 pitch / volume 对视觉的影响
   LyricCharEffect _buildCharEffect({
-    required LyricLine line,
     required LyricChar char,
     required double currentTime,
     required double baseFontSize,
     required double beatPulse,
+    required bool settled,
   }) {
-    // 未到时间：不显示
-    if (currentTime < char.start) {
+    final intensity = motionPreset.intensity;
+
+    // 完成态：整行已经播完并固定显示
+    if (settled) {
+      return LyricCharEffect(
+        opacity: 0.84,
+        scale: 1.0,
+        translateX: 0,
+        translateY: 0,
+        fontSize: baseFontSize * 0.98,
+        color: const Color(0xFFF3F7FF).withOpacity(0.9),
+        glow: 0.0,
+      );
+    }
+
+    // 还没到预进入窗口：隐藏
+    final preEnterStart = char.start - leadInSeconds;
+    if (currentTime < preEnterStart) {
       return LyricCharEffect(
         opacity: 0.0,
-        scale: 0.96,
+        scale: 0.98,
         translateX: 0,
-        translateY: 6,
+        translateY: 4,
         fontSize: baseFontSize,
         color: const Color(0xFFF3F7FF),
         glow: 0.0,
@@ -291,67 +329,305 @@ class LyricLineCard extends StatelessWidget {
     }
 
     final duration = math.max(char.end - char.start, 0.12);
-    final appearDuration = math.max(duration * 0.35, 0.06);
-    final appearProgress = _easeOutCubic(
-      _clamp((currentTime - char.start) / appearDuration, 0.0, 1.0),
+    final appearSpan = math.max(
+      0.06,
+      duration * (0.30 + (1.0 - intensity) * 0.12),
     );
 
-    final active = currentTime >= char.start && currentTime <= char.end;
-    final holdProgress = _clamp((currentTime - char.start) / duration, 0.0, 1.0);
+    // 预进入：先轻轻浮现，不要“蹦”
+    if (currentTime < char.start) {
+      final preProgress = _easeOutCubic(
+        _clamp((currentTime - preEnterStart) / leadInSeconds, 0.0, 1.0),
+      );
 
-    // pitch：音高越高，字越向上；越低，越向下
-    final pitch = _normalizePitch(char.pitch);
-    final pitchOffsetY = pitch == null ? 0.0 : (0.5 - pitch) * 10.0;
+      return LyricCharEffect(
+        opacity: 0.10 + 0.30 * preProgress,
+        scale: 0.98 + 0.015 * preProgress,
+        translateX: preProgress * (2.4 * intensity),
+        translateY: 0,
+        fontSize: baseFontSize * (0.99 + 0.01 * preProgress),
+        color: const Color(0xFFF3F7FF).withOpacity(0.78),
+        glow: 0.0,
+      );
+    }
 
-    // volume：响度越高，字越大
-    final volume = _normalizeLevel(char.volume);
-    final volumeScale = 1.0 + (volume ?? 0.0) * 0.07;
+    // 正在唱：轻微强调
+    if (currentTime <= char.end) {
+      final appearProgress = _easeOutCubic(
+        _clamp((currentTime - char.start) / appearSpan, 0.0, 1.0),
+      );
 
-    // emotion：控制颜色偏向
-    final emotion = _normalizeLevel(
-      char.emotion ?? line.emotion,
-    );
+      final activeProgress = _clamp((currentTime - char.start) / duration, 0.0, 1.0);
+      final driftMaxX = _clamp(3.0 + duration * 8.0 * intensity, 3.0, 12.0);
+      final driftX = _easeOutCubic(activeProgress) * driftMaxX;
 
-    final baseColor = const Color(0xFFF3F7FF);
-    final warmColor = const Color(0xFFFFD58B);
-    final coolColor = const Color(0xFF67D9FF);
+      return LyricCharEffect(
+        opacity: 0.40 + 0.60 * appearProgress,
+        scale: 1.0 + 0.02 * intensity,
+        translateX: driftX,
+        translateY: 0,
+        fontSize: baseFontSize * (1.0 + 0.015 * intensity),
+        color: Color.lerp(
+              const Color(0xFFF3F7FF),
+              const Color(0xFF67D9FF),
+              0.22 + beatPulse * 0.14,
+            ) ??
+            const Color(0xFFF3F7FF),
+        glow: 0.20 + beatPulse * 0.45 * intensity,
+      );
+    }
 
-    // 情绪越强，颜色越向“暖 / 强调”方向走
-    final emotionColor = emotion == null
-        ? baseColor
-        : Color.lerp(coolColor, warmColor, emotion)!;
-
-    // 当前字会向右轻微滑动，长音越长，滑动越明显
-    final driftMaxX = _clamp(6.0 + duration * 18.0, 6.0, 18.0);
-    final driftX = active ? _easeOutCubic(holdProgress) * driftMaxX : 0.0;
-
-    // 当前字高亮时，加发光
-    final glow = active ? (0.35 + beatPulse * 0.65) : 0.0;
-
-    // 当前字比普通字稍微更亮
-    final color = active
-        ? Color.lerp(emotionColor, coolColor, 0.38 + beatPulse * 0.18) ?? emotionColor
-        : emotionColor.withOpacity(0.88);
-
+    // 已经唱完：保留在前面，不消失
+    // 这里不给它做“消失尾巴”，只给一个稳定的轻微停留状态
     return LyricCharEffect(
-      opacity: appearProgress,
-      scale: volumeScale + (active ? 0.06 : 0.0),
-      translateX: driftX,
-      translateY: pitchOffsetY + (active ? -1.5 : 0.0),
-      fontSize: baseFontSize * (1.0 + (volume ?? 0.0) * 0.05 + (active ? 0.03 : 0.0)),
-      color: color,
-      glow: glow,
+      opacity: 1.0,
+      scale: 1.0,
+      translateX: 0.0,
+      translateY: 0.0,
+      fontSize: baseFontSize,
+      color: const Color(0xFFF3F7FF).withOpacity(0.90),
+      glow: 0.0,
     );
   }
 }
 
-/// 副歌长间隔提示卡片
+/// 双槽歌词舞台
 ///
-/// 当两句歌词之间的时间间隔很长时，不要空着。
-/// 这里用“省略号进度”做一个平滑提示，类似 App Music 的处理方式。
+/// 这次的逻辑改成：
+/// - 上一个槽：上一句
+/// - 下一个槽：当前句
+///
+/// 但位置不是固定的，
+/// 它会按照“行号奇偶”在左上 / 右下之间轮换：
+///
+/// 第 1 行：左上
+/// 第 2 行：右下
+/// 第 3 行：左上
+/// 第 4 行：右下
+///
+/// 这样就符合你举的例子。
+class LyricDualSlotStage extends StatelessWidget {
+  final SongModel song;
+  final double lyricTime;
+  final double beatPulse;
+  final Map<String, LyricCharEffect> effectCache;
+  final LyricMotionPreset motionPreset;
+  final bool compactLayout;
+  final double ellipsisPhase;
+
+  const LyricDualSlotStage({
+    super.key,
+    required this.song,
+    required this.lyricTime,
+    required this.beatPulse,
+    required this.effectCache,
+    required this.motionPreset,
+    required this.compactLayout,
+    required this.ellipsisPhase,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (song.lines.isEmpty) {
+      return const EmptyStageCard(
+        title: '暂无歌词',
+        subtitle: '当前歌曲没有可显示的歌词。',
+      );
+    }
+
+    final currentIndex = _findCurrentLineIndex(song.lines, lyricTime);
+
+    if (currentIndex < 0) {
+      return const EmptyStageCard(
+        title: '准备开始',
+        subtitle: '播放后，歌词会按时间平滑出现。',
+      );
+    }
+
+    final currentLine = song.lines[currentIndex];
+    final previousLine = currentIndex > 0 ? song.lines[currentIndex - 1] : null;
+
+    // 当前行出现的位置：偶数行左上，奇数行右下
+    final currentIsTopLeft = currentIndex.isEven;
+
+    final currentCard = LyricLineCard(
+      key: ValueKey('current_$currentIndex'),
+      line: currentLine,
+      lineIndex: currentIndex,
+      totalLines: song.lines.length,
+      currentTime: lyricTime,
+      beatPulse: beatPulse,
+      effectCache: effectCache,
+      slotLabel: '当前歌词',
+      settled: false,
+      leadInSeconds: motionPreset.leadInSeconds,
+      motionPreset: motionPreset,
+    );
+
+    Widget previousWidget;
+    if (previousLine != null) {
+      previousWidget = LyricLineCard(
+        key: ValueKey('previous_${currentIndex - 1}'),
+        line: previousLine,
+        lineIndex: currentIndex - 1,
+        totalLines: song.lines.length,
+        currentTime: lyricTime,
+        beatPulse: beatPulse,
+        effectCache: effectCache,
+        slotLabel: '上一句',
+        settled: true,
+        leadInSeconds: 0.0,
+        motionPreset: motionPreset,
+      );
+    } else {
+      previousWidget = const SizedBox.shrink();
+    }
+
+    // 长间隔副歌提示：
+    // 只在“当前时间落在大间隔”里时显示，不去显示下一句歌词
+    final gapInfo = _findChorusGap(song.lines, lyricTime);
+    Widget activeExtraWidget = const SizedBox.shrink();
+
+    if (gapInfo != null) {
+      activeExtraWidget = ChorusProgressCard(
+        key: ValueKey('gap_${gapInfo.fromIndex}_${gapInfo.toIndex}_${gapInfo.gapStart.toStringAsFixed(2)}'),
+        progress: gapInfo.progress,
+        phase: ellipsisPhase,
+        beatPulse: beatPulse,
+        previousLine: song.lines[gapInfo.fromIndex],
+        nextLine: song.lines[gapInfo.toIndex],
+        gapDuration: gapInfo.gapDuration,
+      );
+    }
+
+    // 位置规则：
+    // - currentIsTopLeft == true:
+    //   左上 = 当前句
+    //   右下 = 上一句
+    // - currentIsTopLeft == false:
+    //   左上 = 上一句
+    //   右下 = 当前句
+    final topLeftChild = currentIsTopLeft
+        ? currentCard
+        : (previousLine != null ? previousWidget : currentCard);
+
+    final bottomRightChild = currentIsTopLeft
+        ? (previousLine != null ? previousWidget : const SizedBox.shrink())
+        : currentCard;
+
+    // 如果当前处于长间隔，那么“当前句”位置改显示副歌进度卡
+    // 但仍然保留上一句。
+    final topLeftFinal = currentIsTopLeft
+        ? currentCard
+        : (previousLine != null ? previousWidget : currentCard);
+
+    final bottomRightFinal = currentIsTopLeft
+        ? (previousLine != null ? previousWidget : const SizedBox.shrink())
+        : currentCard;
+
+    final activeSlotIsTopLeft = currentIsTopLeft;
+
+    if (compactLayout) {
+      // 小屏模式：竖向堆叠，避免挤爆
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (activeSlotIsTopLeft) ...[
+            currentCard,
+            const SizedBox(height: 12),
+            previousLine != null ? previousWidget : const SizedBox.shrink(),
+          ] else ...[
+            previousLine != null ? previousWidget : const SizedBox.shrink(),
+            const SizedBox(height: 12),
+            currentCard,
+          ],
+          if (gapInfo != null) ...[
+            const SizedBox(height: 12),
+            activeExtraWidget,
+          ],
+        ],
+      );
+    }
+
+    return SizedBox(
+      height: 430,
+      child: Stack(
+        children: [
+          Align(
+            alignment: const Alignment(-0.98, -0.84),
+            child: FractionallySizedBox(
+              widthFactor: 0.94,
+              child: topLeftFinal,
+            ),
+          ),
+          Align(
+            alignment: const Alignment(0.98, 0.84),
+            child: FractionallySizedBox(
+              widthFactor: 0.88,
+              child: gapInfo != null
+                  ? activeExtraWidget
+                  : bottomRightFinal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 找当前歌词行：取最后一个 start <= 当前时间的行
+  int _findCurrentLineIndex(List<LyricLine> lines, double currentSec) {
+    int left = 0;
+    int right = lines.length - 1;
+    int ans = -1;
+
+    while (left <= right) {
+      final mid = (left + right) >> 1;
+      if (lines[mid].start <= currentSec) {
+        ans = mid;
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+
+    return ans;
+  }
+
+  /// 识别长间隔区间，用来显示“副歌展开中”的省略号进度
+  ChorusGapInfo? _findChorusGap(List<LyricLine> lines, double currentSec) {
+    const threshold = 2.6;
+
+    for (int i = 0; i < lines.length - 1; i++) {
+      final prev = lines[i];
+      final next = lines[i + 1];
+
+      final gapStart = prev.end;
+      final gapEnd = next.start;
+      final gapDuration = gapEnd - gapStart;
+
+      if (gapDuration >= threshold &&
+          currentSec >= gapStart &&
+          currentSec <= gapEnd) {
+        final progress = ((currentSec - gapStart) / gapDuration).clamp(0.0, 1.0);
+        return ChorusGapInfo(
+          fromIndex: i,
+          toIndex: i + 1,
+          gapStart: gapStart,
+          gapEnd: gapEnd,
+          gapDuration: gapDuration,
+          progress: progress,
+        );
+      }
+    }
+
+    return null;
+  }
+}
+
+/// 长间隔 / 副歌进度卡
 class ChorusProgressCard extends StatelessWidget {
-  final double progress; // 0~1
-  final double phase; // 0~1，外部的循环动画相位
+  final double progress;
+  final double phase;
   final double beatPulse;
   final LyricLine? previousLine;
   final LyricLine? nextLine;
@@ -370,6 +646,7 @@ class ChorusProgressCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     final borderColor = Color.lerp(
       const Color(0xFF2B3140),
       const Color(0xFF67D9FF),
@@ -399,13 +676,6 @@ class ChorusProgressCard extends StatelessWidget {
         color: cardBg,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor, width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
-          ),
-        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -419,11 +689,9 @@ class ChorusProgressCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
 
-          // 省略号进度：越接近副歌，点越“亮”
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(3, (i) {
-              // phase 在 0~1 之间循环，这里让三个点错峰呼吸
               final wave = (math.sin((phase * math.pi * 2) + i * 0.75) + 1) / 2;
               final weight = _clamp(progress * 0.55 + wave * 0.45, 0.0, 1.0);
 
@@ -440,13 +708,6 @@ class ChorusProgressCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: dotColor.withOpacity(0.35 + weight * 0.65),
                   shape: BoxShape.circle,
-                  boxShadow: [
-                    if (weight > 0.25)
-                      BoxShadow(
-                        color: dotColor.withOpacity(0.24),
-                        blurRadius: 10 + weight * 8,
-                      ),
-                  ],
                 ),
               );
             }),
@@ -454,19 +715,14 @@ class ChorusProgressCard extends StatelessWidget {
 
           const SizedBox(height: 14),
 
-          // 进度条：更直观地让用户知道“副歌还在展开”
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               minHeight: 7,
               value: _clamp(progress, 0.0, 1.0),
               backgroundColor: const Color(0xFF1B2435),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                Color.lerp(
-                  const Color(0xFF67D9FF),
-                  const Color(0xFF9A6CFF),
-                  beatPulse * 0.55,
-                )!,
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Color(0xFF67D9FF),
               ),
             ),
           ),
@@ -503,7 +759,7 @@ class ChorusProgressCard extends StatelessWidget {
   }
 }
 
-/// 时间空白时的占位提示
+/// 没歌词时的占位卡
 class EmptyStageCard extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -551,10 +807,7 @@ class EmptyStageCard extends StatelessWidget {
   }
 }
 
-/// -------------------------
 /// 内部工具函数
-/// -------------------------
-
 double _clamp(double v, double min, double max) {
   if (v < min) return min;
   if (v > max) return max;
@@ -566,70 +819,4 @@ double _easeOutCubic(double t) {
   return 1 - math.pow(1 - t, 3).toDouble();
 }
 
-double lerpDouble(double a, double b, double t) {
-  return a + (b - a) * t;
-}
-
-double? _normalizeLevel(dynamic v) {
-  if (v == null || v == '') return null;
-
-  if (v is num) {
-    final d = v.toDouble();
-    if (d >= 0 && d <= 1) return d;
-    return _clamp(d / 100.0, 0.0, 1.0);
-  }
-
-  if (v is String) {
-    switch (v.trim().toLowerCase()) {
-      case 'low':
-      case '弱':
-        return 0.25;
-      case 'mid':
-      case 'middle':
-      case 'medium':
-      case 'normal':
-      case '中':
-        return 0.5;
-      case 'high':
-      case 'strong':
-      case '高':
-      case '强':
-        return 0.85;
-      default:
-        return null;
-    }
-  }
-
-  return null;
-}
-
-double? _normalizePitch(dynamic v) {
-  if (v == null || v == '') return null;
-
-  if (v is num) {
-    final d = v.toDouble();
-    if (d >= 0 && d <= 1) return d;
-    return _clamp(d / 100.0, 0.0, 1.0);
-  }
-
-  if (v is String) {
-    switch (v.trim().toLowerCase()) {
-      case 'low':
-      case '低':
-        return 0.0;
-      case 'mid':
-      case 'middle':
-      case 'medium':
-      case 'normal':
-      case '中':
-        return 0.5;
-      case 'high':
-      case '高':
-        return 1.0;
-      default:
-        return null;
-    }
-  }
-
-  return null;
-}
+double lerpDouble(double a, double b, double t) => a + (b - a) * t;

@@ -4,28 +4,11 @@ import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
+import '../config/song_presets.dart';
 import '../models/lyric_models.dart';
 import '../services/lyric_loader.dart';
 import '../widgets/lyric_widgets.dart';
 
-/// 这里改成你自己的文件名
-const String kLyricAssetPath = 'assets/lyrics/sasanohani_ukatakani_test.json';
-
-/// 这里改成你自己的音频文件名
-const String kAudioAssetPath = 'audio/M・A・O,中澤ミナ,森下来奈 - ささのはに、うたかたに。 (M@STER VERSION).flac';
-
-/// 当两句歌词之间的间隔超过这个值时，认为进入“副歌 / 大间隔段落”
-/// 这个值你后续可以根据别的歌再调：
-/// - 太小：会经常触发
-/// - 太大：副歌提示不明显
-const double kChorusGapThresholdSeconds = 2.6;
-
-/// 这个页面同时负责：
-/// 1. 读取本地歌词 JSON
-/// 2. 播放音频
-/// 3. 根据音频时间推进歌词
-/// 4. 检测节拍并触发闪光
-/// 5. 检测长间隔并显示副歌省略号进度
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
 
@@ -36,65 +19,69 @@ class PlayerPage extends StatefulWidget {
 class _PlayerPageState extends State<PlayerPage>
     with TickerProviderStateMixin {
   // -----------------------------
-  // 数据
+  // 歌曲库
+  // -----------------------------
+  final List<SongPreset> _presets = demoSongPresets;
+  int _presetIndex = 0;
+
+  // -----------------------------
+  // 音频 & 歌词
   // -----------------------------
   SongModel? _song;
-
-  // 当前播放时间 / 音频总时长
-  Duration _position = Duration.zero;
-  Duration _audioDuration = Duration.zero;
-
-  // 播放器状态
   final AudioPlayer _player = AudioPlayer();
   PlayerState _playerState = PlayerState.stopped;
 
-  // 加载和错误
+  Duration _position = Duration.zero;
+  Duration _audioDuration = Duration.zero;
+
   bool _loading = true;
   String _errorText = '';
 
   // -----------------------------
-  // 动画控制器
+  // 动画/显示参数
   // -----------------------------
-  // 副歌省略号的循环动画
-  late final AnimationController _ellipsisController;
+  double _lyricsOffsetMs = 0.0; // 正值 = 歌词更早显示
+  bool _offsetExpanded = false;
 
-  // 节拍闪光控制器
+  LyricMotionPreset _motionPreset = LyricMotionPreset.normal;
+
+  // -----------------------------
+  // 节拍闪光
+  // -----------------------------
   late final AnimationController _beatController;
+  late final AnimationController _ellipsisController;
+  int _lastBeatIndex = -1;
 
   // -----------------------------
-  // 事件订阅
+  // 逐字动画缓存
   // -----------------------------
+  final Map<String, LyricCharEffect> _effectCache = {};
+
+  // -----------------------------
+  // 播放状态
+  // -----------------------------
+  bool _audioPrepared = false;
+
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
   StreamSubscription<PlayerState>? _stateSub;
   StreamSubscription<void>? _completeSub;
 
-  // -----------------------------
-  // 逐字动画缓存
-  // -----------------------------
-  // 用于保存“上一帧”的字效果，让下一帧可以平滑过渡
-  final Map<String, LyricCharEffect> _effectCache = {};
-
-  // -----------------------------
-  // 播放控制
-  // -----------------------------
-  bool _audioPrepared = false;
-
   @override
   void initState() {
     super.initState();
-
-    _ellipsisController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    )..repeat();
 
     _beatController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 260),
     );
 
-    _prepare();
+    _ellipsisController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat();
+
+    _preparePreset(_presets[_presetIndex]);
   }
 
   @override
@@ -105,29 +92,37 @@ class _PlayerPageState extends State<PlayerPage>
     _completeSub?.cancel();
 
     _player.dispose();
-    _ellipsisController.dispose();
     _beatController.dispose();
+    _ellipsisController.dispose();
 
     super.dispose();
   }
 
-  /// 初始化：先加载歌词，再准备音频。
-  Future<void> _prepare() async {
+  /// 加载当前选择的歌曲
+  Future<void> _preparePreset(SongPreset preset) async {
     try {
       setState(() {
         _loading = true;
         _errorText = '';
       });
 
-      // 1. 读取歌词
-      final song = await LyricLoader.loadFromAsset(kLyricAssetPath);
+      _effectCache.clear();
+      _lastBeatIndex = -1;
 
-      // 2. 准备音频播放器
+      // 1) 读取歌词
+      final song = await LyricLoader.loadFromAsset(preset.lyricAsset);
+
+      // 2) 设置音频源
+      await _player.stop();
       await _player.setReleaseMode(ReleaseMode.stop);
-      await _player.setSource(AssetSource(kAudioAssetPath));
-      _audioPrepared = true;
+      await _player.setSource(AssetSource(preset.audioAsset));
 
-      // 3. 监听音频进度
+      // 3) 监听播放状态
+      _positionSub?.cancel();
+      _durationSub?.cancel();
+      _stateSub?.cancel();
+      _completeSub?.cancel();
+
       _positionSub = _player.onPositionChanged.listen((pos) {
         _onPositionUpdate(pos);
       });
@@ -147,13 +142,16 @@ class _PlayerPageState extends State<PlayerPage>
       _completeSub = _player.onPlayerComplete.listen((_) {
         setState(() {
           _playerState = PlayerState.completed;
-          _position = _durationForSongOrAudio;
+          _position = _effectiveDuration;
         });
       });
 
       setState(() {
         _song = song;
         _loading = false;
+        _lyricsOffsetMs = preset.defaultOffsetMs;
+        _motionPreset = preset.defaultMotion;
+        _playerState = PlayerState.stopped;
       });
     } catch (e) {
       setState(() {
@@ -163,11 +161,8 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  /// 音频当前播放时间更新时调用。
   void _onPositionUpdate(Duration pos) {
     final sec = pos.inMilliseconds / 1000.0;
-
-    // 根据时间检测节拍，如果跨过新的节拍点，触发一次闪光
     _triggerBeatIfNeeded(sec);
 
     setState(() {
@@ -175,40 +170,24 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-  /// 当前歌词/音频的有效总时长：
-  /// 优先用音频时长；如果还没拿到音频时长，就用 JSON 里的 duration。
-  Duration get _durationForSongOrAudio {
+  Duration get _effectiveDuration {
     if (_audioDuration.inMilliseconds > 0) return _audioDuration;
     final songDuration = _song?.duration ?? 0.0;
     return Duration(milliseconds: (songDuration * 1000).round());
   }
 
-  /// 当前时间（秒）
   double get _currentSeconds => _position.inMilliseconds / 1000.0;
 
-  /// 当前总时间（秒）
-  double get _totalSeconds {
-    final d = _durationForSongOrAudio;
-    return d.inMilliseconds / 1000.0;
-  }
+  /// 歌词时间 = 音频时间 + 手动偏移
+  /// 正值表示歌词更早显示
+  double get _lyricSeconds => _currentSeconds + _lyricsOffsetMs / 1000.0;
 
-  /// 当前活跃歌词行
-  int get _activeLineIndex {
-    final song = _song;
-    if (song == null || song.lines.isEmpty) return -1;
-    return _findCurrentLineIndex(song.lines, _currentSeconds);
-  }
+  double get _totalSeconds => _effectiveDuration.inMilliseconds / 1000.0;
 
-  /// 当前是否处于“长间隔 / 副歌提示区”
-  ChorusGapInfo? get _activeGapInfo {
-    final song = _song;
-    if (song == null || song.lines.length < 2) return null;
-    return _findChorusGap(song.lines, _currentSeconds);
-  }
+  double get _beatPulse => _beatController.value;
 
-  /// 播放 / 暂停按钮
   Future<void> _togglePlay() async {
-    if (!_audioPrepared) return;
+    if (!_audioPrepared) _audioPrepared = true;
 
     try {
       if (_playerState == PlayerState.playing) {
@@ -217,8 +196,7 @@ class _PlayerPageState extends State<PlayerPage>
           _playerState == PlayerState.completed) {
         await _player.resume();
       } else {
-        // stopped 状态，从头播放
-        await _player.play(AssetSource(kAudioAssetPath));
+        await _player.play(AssetSource(_presets[_presetIndex].audioAsset));
       }
     } catch (e) {
       setState(() {
@@ -227,12 +205,14 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  /// 重播
   Future<void> _restart() async {
     try {
+      _lastBeatIndex = -1;
+      _effectCache.clear();
+
       await _player.stop();
       await _player.seek(Duration.zero);
-      await _player.play(AssetSource(kAudioAssetPath));
+      await _player.play(AssetSource(_presets[_presetIndex].audioAsset));
     } catch (e) {
       setState(() {
         _errorText = '重播失败：$e';
@@ -240,9 +220,8 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  /// 拖动进度条
   Future<void> _seekToFraction(double fraction) async {
-    final total = _durationForSongOrAudio;
+    final total = _effectiveDuration;
     if (total.inMilliseconds <= 0) return;
 
     final targetMs = (total.inMilliseconds * fraction).round();
@@ -254,7 +233,18 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-  /// 节拍触发：如果当前位置跨过了新的 beat 点，就触发一次闪光。
+  Future<void> _changePreset(int index) async {
+    if (index < 0 || index >= _presets.length) return;
+
+    setState(() {
+      _presetIndex = index;
+      _loading = true;
+      _errorText = '';
+    });
+
+    await _preparePreset(_presets[_presetIndex]);
+  }
+
   void _triggerBeatIfNeeded(double currentSec) {
     final song = _song;
     if (song == null || song.beats.isEmpty) return;
@@ -274,9 +264,7 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  int _lastBeatIndex = -1;
-
-  /// 找当前歌词行：取最后一个 start <= 当前时间的行。
+  /// 找当前歌词行
   int _findCurrentLineIndex(List<LyricLine> lines, double currentSec) {
     int left = 0;
     int right = lines.length - 1;
@@ -295,39 +283,6 @@ class _PlayerPageState extends State<PlayerPage>
     return ans;
   }
 
-  /// 检测“长间隔段落”，也就是你说的副歌提示区。
-  ///
-  /// 逻辑：
-  /// - 如果两句歌词之间的 gap 足够长
-  /// - 且当前播放时间落在这个 gap 内
-  /// - 就显示 App Music 风格的省略号进度卡片
-  ChorusGapInfo? _findChorusGap(List<LyricLine> lines, double currentSec) {
-    for (int i = 0; i < lines.length - 1; i++) {
-      final prev = lines[i];
-      final next = lines[i + 1];
-
-      final gapStart = prev.end;
-      final gapEnd = next.start;
-      final gapDuration = gapEnd - gapStart;
-
-      if (gapDuration >= kChorusGapThresholdSeconds &&
-          currentSec >= gapStart &&
-          currentSec <= gapEnd) {
-        final progress = ((currentSec - gapStart) / gapDuration).clamp(0.0, 1.0);
-        return ChorusGapInfo(
-          fromIndex: i,
-          toIndex: i + 1,
-          gapStart: gapStart,
-          gapEnd: gapEnd,
-          gapDuration: gapDuration,
-          progress: progress,
-        );
-      }
-    }
-
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final song = _song;
@@ -344,33 +299,21 @@ class _PlayerPageState extends State<PlayerPage>
             end: Alignment.bottomCenter,
           ),
         ),
-        child: Stack(
-          children: [
-            // 背景柔光
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedBuilder(
-                  animation: _beatController,
-                  builder: (context, _) {
-                    final pulse = _beatController.value;
-                    return Opacity(
-                      opacity: pulse * 0.16,
-                      child: Container(
-                        color: const Color(0xFF67D9FF),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
+        child: SafeArea(
+          child: AnimatedBuilder(
+            animation: Listenable.merge([_beatController, _ellipsisController]),
+            builder: (context, _) {
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final compactLayout = constraints.maxWidth < 390;
 
-            SafeArea(
-              child: AnimatedBuilder(
-                // 这个 AnimatedBuilder 让副歌省略号和节拍闪光都能顺滑刷新
-                animation: Listenable.merge([_ellipsisController, _beatController]),
-                builder: (context, _) {
                   return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      12,
+                      16,
+                      compactLayout ? 12 : 16,
+                    ),
                     child: _loading
                         ? _buildLoading()
                         : _errorText.isNotEmpty
@@ -380,33 +323,36 @@ class _PlayerPageState extends State<PlayerPage>
                                 : Column(
                                     children: [
                                       _buildHeader(song),
-                                      const SizedBox(height: 18),
+                                      const SizedBox(height: 14),
 
+                                      /// 中部歌词区尽量占大部分屏幕
                                       Expanded(
                                         child: Center(
-                                          child: _buildLyricStage(song),
+                                          child: _buildLyricStage(
+                                            song: song,
+                                            compactLayout: compactLayout,
+                                          ),
                                         ),
                                       ),
 
-                                      const SizedBox(height: 14),
+                                      const SizedBox(height: 12),
                                       _buildBeatMeter(),
-                                      const SizedBox(height: 14),
+                                      const SizedBox(height: 12),
                                       _buildControls(),
                                     ],
                                   ),
                   );
                 },
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
 
-  /// 顶部信息栏
   Widget _buildHeader(SongModel song) {
-    final total = _durationForSongOrAudio;
+    final total = _effectiveDuration;
     final currentText = _formatDuration(_position);
     final totalText = _formatDuration(total);
     final stateText = switch (_playerState) {
@@ -416,49 +362,101 @@ class _PlayerPageState extends State<PlayerPage>
       _ => '待播放',
     };
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    song.artist,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      color: Color(0xFFA7B6D6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _buildSmallPill(stateText),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$currentText / $totalText',
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF71D9FF),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        /// 小而不打扰的歌曲选择器
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0B1220),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF2B3140)),
+          ),
+          child: Row(
             children: [
-              Text(
-                song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
+              const Text(
+                '歌曲',
+                style: TextStyle(
+                  color: Color(0xFF96A6C8),
+                  fontSize: 13,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                song.artist,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: Color(0xFFA7B6D6),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: _presetIndex,
+                    isDense: true,
+                    dropdownColor: const Color(0xFF0B1220),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                    ),
+                    items: List.generate(_presets.length, (index) {
+                      final preset = _presets[index];
+                      return DropdownMenuItem(
+                        value: index,
+                        child: Text(
+                          preset.displayName,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }),
+                    onChanged: (index) {
+                      if (index != null) {
+                        _changePreset(index);
+                      }
+                    },
+                  ),
                 ),
               ),
             ],
           ),
-        ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _buildSmallPill(stateText),
-            const SizedBox(height: 8),
-            Text(
-              '$currentText / $totalText',
-              style: const TextStyle(
-                fontSize: 14,
-                color: Color(0xFF71D9FF),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
         ),
       ],
     );
@@ -483,92 +481,33 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  /// 主歌词区域
-  Widget _buildLyricStage(SongModel song) {
-    final currentLineIndex = _activeLineIndex;
-    final gapInfo = _activeGapInfo;
-    final beatPulse = _beatController.value;
+  Widget _buildLyricStage({
+  required SongModel song,
+  required bool compactLayout,
+}) {
+  final lyricIndex = _findCurrentLineIndex(song.lines, _lyricSeconds);
 
-    // 还没到第一句
-    if (currentLineIndex < 0 && gapInfo == null) {
-      return const EmptyStageCard(
-        title: '准备开始',
-        subtitle: '正在等待歌词进入。\n播放后，逐字歌词会按时间平滑出现。',
-      );
-    }
-
-    // 长间隔区：显示“副歌展开中”的省略号进度
-    if (gapInfo != null) {
-      final prev = song.lines[gapInfo.fromIndex];
-      final next = song.lines[gapInfo.toIndex];
-
-      return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 320),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, anim) {
-          final slide = Tween<Offset>(
-            begin: const Offset(0, 0.06),
-            end: Offset.zero,
-          ).animate(anim);
-
-          return FadeTransition(
-            opacity: anim,
-            child: SlideTransition(
-              position: slide,
-              child: child,
-            ),
-          );
-        },
-        child: ChorusProgressCard(
-          key: ValueKey('gap_${gapInfo.fromIndex}_${gapInfo.toIndex}_${gapInfo.gapStart.toStringAsFixed(2)}'),
-          progress: gapInfo.progress,
-          phase: _ellipsisController.value,
-          beatPulse: beatPulse,
-          previousLine: prev,
-          nextLine: next,
-          gapDuration: gapInfo.gapDuration,
-        ),
-      );
-    }
-
-    // 正常歌词行
-    final line = song.lines[currentLineIndex.clamp(0, song.lines.length - 1)];
-
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 320),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, anim) {
-        final slide = Tween<Offset>(
-          begin: const Offset(0, 0.08),
-          end: Offset.zero,
-        ).animate(anim);
-
-        return FadeTransition(
-          opacity: anim,
-          child: SlideTransition(
-            position: slide,
-            child: child,
-          ),
-        );
-      },
-      child: LyricLineCard(
-        key: ValueKey('line_$currentLineIndex'),
-        line: line,
-        lineIndex: currentLineIndex,
-        totalLines: song.lines.length,
-        currentTime: _currentSeconds,
-        beatPulse: beatPulse,
-        effectCache: _effectCache,
-      ),
+  if (lyricIndex < 0) {
+    return const EmptyStageCard(
+      title: '准备开始',
+      subtitle: '播放后，歌词会按时间平滑出现。\n你也可以先调整歌词偏移。',
     );
   }
 
-  /// 节拍条：简单但有存在感
+  return LyricDualSlotStage(
+    song: song,
+    lyricTime: _lyricSeconds,
+    beatPulse: _beatPulse,
+    effectCache: _effectCache,
+    motionPreset: _motionPreset,
+    compactLayout: compactLayout,
+    ellipsisPhase: _ellipsisController.value,
+  );
+}
+
   Widget _buildBeatMeter() {
-    final pulse = _beatController.value;
-    final total = _durationForSongOrAudio;
+    final pulse = _beatPulse;
+    final total = _effectiveDuration;
     final progress = total.inMilliseconds > 0
         ? (_position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
@@ -607,9 +546,7 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           const SizedBox(height: 8),
           Text(
-            _activeGapInfo == null
-                ? '节拍反馈：播放进度 ${_formatPercent(progress)}'
-                : '副歌提示：${_formatPercent(_activeGapInfo!.progress)} · 省略号进度',
+            '节拍反馈：播放进度 ${_formatPercent(progress)}',
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 13,
@@ -621,9 +558,8 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  /// 播放控制区
   Widget _buildControls() {
-    final total = _durationForSongOrAudio;
+    final total = _effectiveDuration;
     final sliderValue = total.inMilliseconds > 0
         ? (_position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
@@ -648,25 +584,150 @@ class _PlayerPageState extends State<PlayerPage>
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: const Color(0xFF67D9FF),
-              inactiveTrackColor: const Color(0xFF283040),
-              thumbColor: const Color(0xFF9A6CFF),
-              overlayColor: const Color(0x3367D9FF),
-              trackHeight: 4.5,
-            ),
-            child: Slider(
-              value: sliderValue,
-              onChanged: total.inMilliseconds > 0
-                  ? (v) => _seekToFraction(v)
-                  : null,
+          /// 小型歌词校准面板：默认收起
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              setState(() {
+                _offsetExpanded = !_offsetExpanded;
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  const Text(
+                    '歌词校准',
+                    style: TextStyle(
+                      color: Color(0xFFA7B6D6),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _lyricsOffsetMs >= 0
+                        ? '+${_lyricsOffsetMs.toStringAsFixed(0)}ms'
+                        : '${_lyricsOffsetMs.toStringAsFixed(0)}ms',
+                    style: const TextStyle(
+                      color: Color(0xFF71D9FF),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _offsetExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 20,
+                    color: const Color(0xFFA7B6D6),
+                  ),
+                ],
+              ),
             ),
           ),
 
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Column(
+              children: [
+                const SizedBox(height: 8),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: const Color(0xFF67D9FF),
+                    inactiveTrackColor: const Color(0xFF283040),
+                    thumbColor: const Color(0xFF9A6CFF),
+                    overlayColor: const Color(0x3367D9FF),
+                    trackHeight: 4.5,
+                  ),
+                  child: Slider(
+                    min: -800,
+                    max: 800,
+                    divisions: 32,
+                    value: _lyricsOffsetMs.clamp(-800, 800),
+                    label: _lyricsOffsetMs >= 0
+                        ? '+${_lyricsOffsetMs.toStringAsFixed(0)}ms'
+                        : '${_lyricsOffsetMs.toStringAsFixed(0)}ms',
+                    onChanged: (v) {
+                      setState(() {
+                        _lyricsOffsetMs = v;
+                      });
+                    },
+                  ),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _smallOffsetButton('-200', () {
+                      setState(() => _lyricsOffsetMs -= 200);
+                    }),
+                    _smallOffsetButton('-50', () {
+                      setState(() => _lyricsOffsetMs -= 50);
+                    }),
+                    _smallOffsetButton('+50', () {
+                      setState(() => _lyricsOffsetMs += 50);
+                    }),
+                    _smallOffsetButton('+200', () {
+                      setState(() => _lyricsOffsetMs += 200);
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
+            crossFadeState: _offsetExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 220),
+          ),
+
           const SizedBox(height: 8),
+
+          /// 动画风格切换：柔和 / 标准 / 强烈
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: LyricMotionPreset.values.map((preset) {
+                final selected = preset == _motionPreset;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () {
+                    setState(() {
+                      _motionPreset = preset;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFF67D9FF).withOpacity(0.20)
+                          : const Color(0xFF172133),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: selected
+                            ? const Color(0xFF67D9FF)
+                            : const Color(0xFF2B3140),
+                      ),
+                    ),
+                    child: Text(
+                      preset.label,
+                      style: TextStyle(
+                        color: selected ? Colors.white : const Color(0xFFA7B6D6),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+
+          const SizedBox(height: 14),
 
           Row(
             children: [
@@ -687,7 +748,48 @@ class _PlayerPageState extends State<PlayerPage>
               ),
             ],
           ),
+
+          const SizedBox(height: 8),
+
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: const Color(0xFF67D9FF),
+              inactiveTrackColor: const Color(0xFF283040),
+              thumbColor: const Color(0xFF9A6CFF),
+              overlayColor: const Color(0x3367D9FF),
+              trackHeight: 4.5,
+            ),
+            child: Slider(
+              value: sliderValue,
+              onChanged: total.inMilliseconds > 0
+                  ? (v) => _seekToFraction(v)
+                  : null,
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _smallOffsetButton(String label, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF172133),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF2B3140)),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Color(0xFFF3F7FF),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
@@ -780,23 +882,4 @@ class _PlayerPageState extends State<PlayerPage>
   String _formatPercent(double v) {
     return '${(v * 100).round()}%';
   }
-}
-
-/// 长间隔区的信息
-class ChorusGapInfo {
-  final int fromIndex;
-  final int toIndex;
-  final double gapStart;
-  final double gapEnd;
-  final double gapDuration;
-  final double progress;
-
-  ChorusGapInfo({
-    required this.fromIndex,
-    required this.toIndex,
-    required this.gapStart,
-    required this.gapEnd,
-    required this.gapDuration,
-    required this.progress,
-  });
 }
