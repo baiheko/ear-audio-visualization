@@ -683,7 +683,7 @@ class ChorusProgressCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('副歌展开中', style: title),
+              //Text('副歌展开中', style: title),
               Text('${gapDuration.toStringAsFixed(1)}s', style: subtitle),
             ],
           ),
@@ -730,7 +730,7 @@ class ChorusProgressCard extends StatelessWidget {
           const SizedBox(height: 10),
 
           Text(
-            '当前正在进入更强烈的段落',
+            '副歌展开中...',
             style: subtitle,
             textAlign: TextAlign.center,
           ),

@@ -164,4 +164,14 @@ const demoSongPresets = <SongPreset>[
     defaultMotion: LyricMotionPreset.normal,
   ),
 
+  SongPreset(
+    id: '自己肯定感爆上げ↑↑しゅきしゅきソング',
+    title: "自己肯定感爆上げ↑↑しゅきしゅきソング",
+    artist: "藤田ことね",
+    lyricAsset: "assets/lyrics/自己肯定感爆上げ↑↑しゅきしゅきソング.json",
+    audioAsset: "audio/自己肯定感爆上げ↑↑しゅきしゅきソング.flac",
+    defaultOffsetMs: 0,
+    defaultMotion: LyricMotionPreset.normal,
+  ),
+
 ];
