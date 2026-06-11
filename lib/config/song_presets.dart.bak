@@ -143,25 +143,4 @@ const demoSongPresets = <SongPreset>[
   //   defaultOffsetMs: 0,
   //   defaultMotion: LyricMotionPreset.normal,
   // ),
-
-  SongPreset(
-    id: 'いきづらい部！',
-    title: "いきづらい部！",
-    artist: "麻布麻衣(CV.遠藤璃菜)",
-    lyricAsset: "assets/lyrics/いきづらい部！.json",
-    audioAsset: "audio/いきづらい部！.flac",
-    defaultOffsetMs: 0,
-    defaultMotion: LyricMotionPreset.normal,
-  ),
-
-  SongPreset(
-    id: '急がばチル☆',
-    title: "急がばチル☆",
-    artist: "羊宫妃那",
-    lyricAsset: "assets/lyrics/急がばチル☆.json",
-    audioAsset: "audio/急がばチル☆.flac",
-    defaultOffsetMs: 0,
-    defaultMotion: LyricMotionPreset.normal,
-  ),
-
 ];

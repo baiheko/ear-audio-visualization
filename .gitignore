@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+assets/audio/M・A・O,中澤ミナ,森下来奈 - ささのはに、うたかたに。 (M@STER VERSION).flac
+assets/audio/告白气球 - 周杰伦.flac
+assets/audio/宇多田ヒカル - One Last Kiss.flac
+assets/audio/上原れな - 届かない恋.flac
+assets/audio/小泉萌香 - 余韻.flac
+*.flac
