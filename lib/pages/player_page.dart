@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -335,8 +334,8 @@ class _PlayerPageState extends State<PlayerPage>
                                         ),
                                       ),
 
-                                      const SizedBox(height: 12),
-                                      _buildBeatMeter(),
+                                      // const SizedBox(height: 12),
+                                      // _buildBeatMeter(),
                                       const SizedBox(height: 12),
                                       _buildControls(),
                                     ],
