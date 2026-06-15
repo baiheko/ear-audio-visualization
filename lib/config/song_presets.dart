@@ -95,7 +95,7 @@ const demoSongPresets = <SongPreset>[
     id: 'todokanai',
     title: '上原れな - 届かない恋',
     artist: '上原れな',
-    lyricAsset: 'assets/lyrics/届かない恋.json',
+    lyricAsset: 'assets/lyrics/届かない恋_with_beats.json',
     audioAsset: 'audio/上原れな - 届かない恋.flac',
     defaultOffsetMs: 1,
     defaultMotion: LyricMotionPreset.normal,

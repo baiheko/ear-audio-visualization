@@ -318,7 +318,8 @@ class _PlayerPageState extends State<PlayerPage>
         ),
         child: SafeArea(
           child: AnimatedBuilder(
-            animation: Listenable.merge([_beatController, _ellipsisController]),
+            //animation: Listenable.merge([_beatController, _ellipsisController]),
+            animation: _ellipsisController,
             builder: (context, _) {
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -489,7 +490,7 @@ class _PlayerPageState extends State<PlayerPage>
     return LyricDualSlotStage(
       song: song,
       lyricTime: _lyricSeconds,
-      beatPulse: _beatPulse,
+      beatPulse: 0.0,
       effectCache: _effectCache,
       motionPreset: _motionPreset,
       compactLayout: compactLayout,
