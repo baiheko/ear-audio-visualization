@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:vibration/vibration.dart';
 
 import '../config/song_presets.dart';
 import '../models/lyric_models.dart';
@@ -41,6 +43,7 @@ class _PlayerPageState extends State<PlayerPage>
   // -----------------------------
   double _lyricsOffsetMs = 0.0; // 正值 = 歌词更早显示
   bool _offsetExpanded = false;
+  bool _vibrationEnabled = false;
 
   LyricMotionPreset _motionPreset = LyricMotionPreset.normal;
 
@@ -56,9 +59,6 @@ class _PlayerPageState extends State<PlayerPage>
   // -----------------------------
   final Map<String, LyricCharEffect> _effectCache = {};
 
-  // -----------------------------
-  // 播放状态
-  // -----------------------------
   bool _audioPrepared = false;
 
   StreamSubscription<Duration>? _positionSub;
@@ -117,10 +117,10 @@ class _PlayerPageState extends State<PlayerPage>
       await _player.setSource(AssetSource(preset.audioAsset));
 
       // 3) 监听播放状态
-      _positionSub?.cancel();
-      _durationSub?.cancel();
-      _stateSub?.cancel();
-      _completeSub?.cancel();
+      await _positionSub?.cancel();
+      await _durationSub?.cancel();
+      await _stateSub?.cancel();
+      await _completeSub?.cancel();
 
       _positionSub = _player.onPositionChanged.listen((pos) {
         _onPositionUpdate(pos);
@@ -169,6 +169,7 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// 当前有效总时长：优先用音频时长，否则用 JSON 里的 duration
   Duration get _effectiveDuration {
     if (_audioDuration.inMilliseconds > 0) return _audioDuration;
     final songDuration = _song?.duration ?? 0.0;
@@ -185,6 +186,25 @@ class _PlayerPageState extends State<PlayerPage>
 
   double get _beatPulse => _beatController.value;
 
+  /// 计算副歌识别阈值：
+  /// - 至少 4.2 秒
+  /// - 或者大于本首歌“普通间隔中位数”的 2.8 倍
+  double get _chorusGapThresholdSeconds {
+    final song = _song;
+    if (song == null || song.lines.length < 2) return 4.2;
+
+    final gaps = <double>[];
+    for (int i = 0; i < song.lines.length - 1; i++) {
+      final gap = song.lines[i + 1].start - song.lines[i].end;
+      if (gap > 0) gaps.add(gap);
+    }
+
+    if (gaps.isEmpty) return 4.2;
+
+    final median = _median(gaps);
+    return math.max(4.2, median * 2.8);
+  }
+
   Future<void> _togglePlay() async {
     if (!_audioPrepared) _audioPrepared = true;
 
@@ -200,21 +220,6 @@ class _PlayerPageState extends State<PlayerPage>
     } catch (e) {
       setState(() {
         _errorText = '播放失败：$e';
-      });
-    }
-  }
-
-  Future<void> _restart() async {
-    try {
-      _lastBeatIndex = -1;
-      _effectCache.clear();
-
-      await _player.stop();
-      await _player.seek(Duration.zero);
-      await _player.play(AssetSource(_presets[_presetIndex].audioAsset));
-    } catch (e) {
-      setState(() {
-        _errorText = '重播失败：$e';
       });
     }
   }
@@ -260,10 +265,23 @@ class _PlayerPageState extends State<PlayerPage>
     if (latestBeatIndex > _lastBeatIndex) {
       _lastBeatIndex = latestBeatIndex;
       _beatController.forward(from: 0.0);
+      _vibrateIfEnabled();
     }
   }
 
-  /// 找当前歌词行
+  Future<void> _vibrateIfEnabled() async {
+    if (!_vibrationEnabled) return;
+
+    try {
+      final hasVibrator = await Vibration.hasVibrator() ?? false;
+      if (!hasVibrator) return;
+      await Vibration.vibrate(duration: 18);
+    } catch (_) {
+      // 真机没有震动能力或者插件不可用时，直接忽略
+    }
+  }
+
+  /// 找当前歌词行：取最后一个 start <= 当前时间的行
   int _findCurrentLineIndex(List<LyricLine> lines, double currentSec) {
     int left = 0;
     int right = lines.length - 1;
@@ -304,14 +322,14 @@ class _PlayerPageState extends State<PlayerPage>
             builder: (context, _) {
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  final compactLayout = constraints.maxWidth < 390;
+                  final compactLayout = constraints.maxWidth < 390 || constraints.maxHeight < 760;
 
                   return Padding(
                     padding: EdgeInsets.fromLTRB(
-                      16,
-                      12,
-                      16,
-                      compactLayout ? 12 : 16,
+                      compactLayout ? 14 : 16,
+                      compactLayout ? 10 : 12,
+                      compactLayout ? 14 : 16,
+                      compactLayout ? 10 : 14,
                     ),
                     child: _loading
                         ? _buildLoading()
@@ -321,8 +339,8 @@ class _PlayerPageState extends State<PlayerPage>
                                 ? _buildLoading()
                                 : Column(
                                     children: [
-                                      _buildHeader(song),
-                                      const SizedBox(height: 14),
+                                      _buildHeader(song, compactLayout),
+                                      SizedBox(height: compactLayout ? 8 : 12),
 
                                       /// 中部歌词区尽量占大部分屏幕
                                       Expanded(
@@ -334,10 +352,8 @@ class _PlayerPageState extends State<PlayerPage>
                                         ),
                                       ),
 
-                                      // const SizedBox(height: 12),
-                                      // _buildBeatMeter(),
-                                      const SizedBox(height: 12),
-                                      _buildControls(),
+                                      SizedBox(height: compactLayout ? 8 : 12),
+                                      _buildControls(compactLayout),
                                     ],
                                   ),
                   );
@@ -350,7 +366,7 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  Widget _buildHeader(SongModel song) {
+  Widget _buildHeader(SongModel song, bool compactLayout) {
     final total = _effectiveDuration;
     final currentText = _formatDuration(_position);
     final totalText = _formatDuration(total);
@@ -360,6 +376,9 @@ class _PlayerPageState extends State<PlayerPage>
       PlayerState.completed => '已结束',
       _ => '待播放',
     };
+
+    final titleSize = compactLayout ? 21.5 : 24.0;
+    final artistSize = compactLayout ? 13.5 : 15.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -375,95 +394,69 @@ class _PlayerPageState extends State<PlayerPage>
                     song.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 24,
+                    style: TextStyle(
+                      fontSize: titleSize,
                       fontWeight: FontWeight.w800,
                       color: Colors.white,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     song.artist,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      color: Color(0xFFA7B6D6),
+                    style: TextStyle(
+                      fontSize: artistSize,
+                      color: const Color(0xFFA7B6D6),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            _buildSmallPill(stateText),
+            const SizedBox(width: 10),
+            _buildSmallPill(stateText, compactLayout),
+            const SizedBox(width: 6),
+            PopupMenuButton<int>(
+              icon: const Icon(
+                Icons.library_music_outlined,
+                color: Color(0xFFB8C7E4),
+                size: 20,
+              ),
+              tooltip: '切换歌曲',
+              color: const Color(0xFF0B1220),
+              onSelected: _changePreset,
+              itemBuilder: (context) {
+                return List.generate(_presets.length, (index) {
+                  final preset = _presets[index];
+                  return PopupMenuItem<int>(
+                    value: index,
+                    child: Text(
+                      preset.displayName,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  );
+                });
+              },
+            ),
           ],
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: compactLayout ? 6 : 8),
         Text(
           '$currentText / $totalText',
-          style: const TextStyle(
-            fontSize: 14,
-            color: Color(0xFF71D9FF),
+          style: TextStyle(
+            fontSize: compactLayout ? 12.5 : 14,
+            color: const Color(0xFF71D9FF),
             fontWeight: FontWeight.w600,
-          ),
-        ),
-
-        const SizedBox(height: 10),
-
-        /// 小而不打扰的歌曲选择器
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0B1220),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF2B3140)),
-          ),
-          child: Row(
-            children: [
-              const Text(
-                '歌曲',
-                style: TextStyle(
-                  color: Color(0xFF96A6C8),
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    value: _presetIndex,
-                    isDense: true,
-                    dropdownColor: const Color(0xFF0B1220),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                    ),
-                    items: List.generate(_presets.length, (index) {
-                      final preset = _presets[index];
-                      return DropdownMenuItem(
-                        value: index,
-                        child: Text(
-                          preset.displayName,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }),
-                    onChanged: (index) {
-                      if (index != null) {
-                        _changePreset(index);
-                      }
-                    },
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSmallPill(String text) {
+  Widget _buildSmallPill(String text, bool compactLayout) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: EdgeInsets.symmetric(
+        horizontal: compactLayout ? 9 : 10,
+        vertical: compactLayout ? 4 : 5,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFF12233A),
         borderRadius: BorderRadius.circular(999),
@@ -471,8 +464,8 @@ class _PlayerPageState extends State<PlayerPage>
       ),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 12,
+        style: TextStyle(
+          fontSize: compactLayout ? 11.5 : 12,
           color: Colors.white,
           fontWeight: FontWeight.w600,
         ),
@@ -481,93 +474,46 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Widget _buildLyricStage({
-  required SongModel song,
-  required bool compactLayout,
-}) {
-  final lyricIndex = _findCurrentLineIndex(song.lines, _lyricSeconds);
+    required SongModel song,
+    required bool compactLayout,
+  }) {
+    final lyricIndex = _findCurrentLineIndex(song.lines, _lyricSeconds);
 
-  if (lyricIndex < 0) {
-    return const EmptyStageCard(
-      title: '准备开始',
-      subtitle: '播放后，歌词会按时间平滑出现。\n你也可以先调整歌词偏移。',
+    if (lyricIndex < 0) {
+      return const EmptyStageCard(
+        title: '准备开始',
+        subtitle: '播放后，歌词会按时间平滑出现。\n你也可以先调整歌词偏移。',
+      );
+    }
+
+    return LyricDualSlotStage(
+      song: song,
+      lyricTime: _lyricSeconds,
+      beatPulse: _beatPulse,
+      effectCache: _effectCache,
+      motionPreset: _motionPreset,
+      compactLayout: compactLayout,
+      ellipsisPhase: _ellipsisController.value,
+      chorusGapThresholdSeconds: _chorusGapThresholdSeconds,
     );
   }
 
-  return LyricDualSlotStage(
-    song: song,
-    lyricTime: _lyricSeconds,
-    beatPulse: _beatPulse,
-    effectCache: _effectCache,
-    motionPreset: _motionPreset,
-    compactLayout: compactLayout,
-    ellipsisPhase: _ellipsisController.value,
-  );
-}
-
-  Widget _buildBeatMeter() {
-    final pulse = _beatPulse;
-    final total = _effectiveDuration;
-    final progress = total.inMilliseconds > 0
-        ? (_position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-
-    final fillColor = Color.lerp(
-      const Color(0xFF67D9FF),
-      const Color(0xFF9A6CFF),
-      pulse * 0.55,
-    )!;
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0B1220),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Color.lerp(
-            const Color(0xFF2B3140),
-            const Color(0xFF67D9FF),
-            pulse * 0.5,
-          )!,
-          width: 1.0,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              minHeight: 7,
-              value: progress,
-              backgroundColor: const Color(0xFF1B2435),
-              valueColor: AlwaysStoppedAnimation<Color>(fillColor),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '节拍反馈：播放进度 ${_formatPercent(progress)}',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFFA8B8D9),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildControls() {
+  Widget _buildControls(bool compactLayout) {
     final total = _effectiveDuration;
     final sliderValue = total.inMilliseconds > 0
         ? (_position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      padding: EdgeInsets.fromLTRB(
+        compactLayout ? 14 : 16,
+        compactLayout ? 12 : 14,
+        compactLayout ? 14 : 16,
+        compactLayout ? 12 : 16,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFF0B1220),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(compactLayout ? 18 : 22),
         border: Border.all(color: const Color(0xFF2B3140), width: 1.0),
       ),
       child: Column(
@@ -583,69 +529,127 @@ class _PlayerPageState extends State<PlayerPage>
               ),
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: compactLayout ? 8 : 10),
 
-          /// 小型歌词校准面板：默认收起
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              setState(() {
-                _offsetExpanded = !_offsetExpanded;
-              });
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
+          /// 播放按钮放在进度条前面，按钮做小一点
+          Row(
+            children: [
+              _buildActionButton(
+                label: _playerState == PlayerState.playing ? '暂停' : '播放',
+                onTap: _togglePlay,
+                primary: true,
+                compactLayout: compactLayout,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: const Color(0xFF67D9FF),
+                    inactiveTrackColor: const Color(0xFF283040),
+                    thumbColor: const Color(0xFF9A6CFF),
+                    overlayColor: const Color(0x3367D9FF),
+                    trackHeight: compactLayout ? 3.8 : 4.5,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                  ),
+                  child: Slider(
+                    value: sliderValue,
+                    onChanged: total.inMilliseconds > 0
+                        ? (v) => _seekToFraction(v)
+                        : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          SizedBox(height: compactLayout ? 6 : 8),
+
+          Row(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  setState(() {
+                    _offsetExpanded = !_offsetExpanded;
+                  });
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  child: Row(
+                    children: [
+                      const Text(
+                        '歌词校准',
+                        style: TextStyle(
+                          color: Color(0xFFA7B6D6),
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _lyricsOffsetMs >= 0
+                            ? '+${_lyricsOffsetMs.toStringAsFixed(0)}ms'
+                            : '${_lyricsOffsetMs.toStringAsFixed(0)}ms',
+                        style: const TextStyle(
+                          color: Color(0xFF71D9FF),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _offsetExpanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        size: 18,
+                        color: const Color(0xFFA7B6D6),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    '歌词校准',
+                    '震动',
                     style: TextStyle(
                       color: Color(0xFFA7B6D6),
                       fontSize: 13,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    _lyricsOffsetMs >= 0
-                        ? '+${_lyricsOffsetMs.toStringAsFixed(0)}ms'
-                        : '${_lyricsOffsetMs.toStringAsFixed(0)}ms',
-                    style: const TextStyle(
-                      color: Color(0xFF71D9FF),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    _offsetExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    size: 20,
-                    color: const Color(0xFFA7B6D6),
+                  Switch.adaptive(
+                    value: _vibrationEnabled,
+                    onChanged: (v) {
+                      setState(() {
+                        _vibrationEnabled = v;
+                      });
+                    },
                   ),
                 ],
               ),
-            ),
+            ],
           ),
 
           AnimatedCrossFade(
             firstChild: const SizedBox.shrink(),
             secondChild: Column(
               children: [
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     activeTrackColor: const Color(0xFF67D9FF),
                     inactiveTrackColor: const Color(0xFF283040),
                     thumbColor: const Color(0xFF9A6CFF),
                     overlayColor: const Color(0x3367D9FF),
-                    trackHeight: 4.5,
+                    trackHeight: 3.8,
                   ),
                   child: Slider(
                     min: -800,
                     max: 800,
                     divisions: 32,
-                    value: _lyricsOffsetMs.clamp(-800, 800),
+                    value: _lyricsOffsetMs.clamp(-800.0, 800.0).toDouble(),
                     label: _lyricsOffsetMs >= 0
                         ? '+${_lyricsOffsetMs.toStringAsFixed(0)}ms'
                         : '${_lyricsOffsetMs.toStringAsFixed(0)}ms',
@@ -673,97 +677,13 @@ class _PlayerPageState extends State<PlayerPage>
                     }),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 4),
               ],
             ),
             crossFadeState: _offsetExpanded
                 ? CrossFadeState.showSecond
                 : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 220),
-          ),
-
-          const SizedBox(height: 8),
-
-          /// 动画风格切换：柔和 / 标准 / 强烈
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: LyricMotionPreset.values.map((preset) {
-                final selected = preset == _motionPreset;
-                return InkWell(
-                  borderRadius: BorderRadius.circular(999),
-                  onTap: () {
-                    setState(() {
-                      _motionPreset = preset;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFF67D9FF).withValues(alpha: 0.20)
-                          : const Color(0xFF172133),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFF67D9FF)
-                            : const Color(0xFF2B3140),
-                      ),
-                    ),
-                    child: Text(
-                      preset.label,
-                      style: TextStyle(
-                        color: selected ? Colors.white : const Color(0xFFA7B6D6),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          Row(
-            children: [
-              Expanded(
-                child: _buildActionButton(
-                  label: _playerState == PlayerState.playing ? '暂停' : '播放',
-                  onTap: _togglePlay,
-                  primary: true,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildActionButton(
-                  label: '重播',
-                  onTap: _restart,
-                  primary: false,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: const Color(0xFF67D9FF),
-              inactiveTrackColor: const Color(0xFF283040),
-              thumbColor: const Color(0xFF9A6CFF),
-              overlayColor: const Color(0x3367D9FF),
-              trackHeight: 4.5,
-            ),
-            child: Slider(
-              value: sliderValue,
-              onChanged: total.inMilliseconds > 0
-                  ? (v) => _seekToFraction(v)
-                  : null,
-            ),
           ),
         ],
       ),
@@ -797,6 +717,7 @@ class _PlayerPageState extends State<PlayerPage>
     required String label,
     required VoidCallback onTap,
     required bool primary,
+    required bool compactLayout,
   }) {
     final bg = primary
         ? const LinearGradient(
@@ -808,14 +729,15 @@ class _PlayerPageState extends State<PlayerPage>
         : null;
 
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(14),
       onTap: onTap,
       child: Container(
-        height: 54,
+        width: compactLayout ? 72 : 78,
+        height: compactLayout ? 40 : 44,
         decoration: BoxDecoration(
           gradient: bg,
           color: primary ? null : const Color(0xFF172133),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: primary ? Colors.transparent : const Color(0xFF2B3140),
             width: 1.0,
@@ -825,7 +747,7 @@ class _PlayerPageState extends State<PlayerPage>
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 16,
+            fontSize: compactLayout ? 13.5 : 14.5,
             fontWeight: FontWeight.w700,
             color: primary ? Colors.white : const Color(0xFFF3F7FF),
           ),
@@ -878,7 +800,11 @@ class _PlayerPageState extends State<PlayerPage>
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
-  String _formatPercent(double v) {
-    return '${(v * 100).round()}%';
+  double _median(List<double> values) {
+    if (values.isEmpty) return 0.0;
+    final sorted = List<double>.from(values)..sort();
+    final mid = sorted.length >> 1;
+    if (sorted.length.isOdd) return sorted[mid];
+    return (sorted[mid - 1] + sorted[mid]) / 2.0;
   }
 }
