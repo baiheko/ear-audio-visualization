@@ -1,0 +1,28 @@
+{
+  "lines": [
+    {
+      "text": "夜晚一个人走在街上",
+      "emotion": 0.3,
+      "beat": "soft",
+      "type": "chorus"
+    },
+    {
+      "text": "风吹过我的脸",
+      "emotion": 0.6,
+      "beat": "normal",
+      "type": "verse"
+    },
+    {
+      "text": "回忆涌上心头",
+      "emotion": 0.85,
+      "beat": "strong",
+      "type": "verse"
+    },
+    {
+      "text": "夜晚一个人走在街上",
+      "emotion": 0.35,
+      "beat": "soft",
+      "type": "chorus"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import '../config/song_presets.dart';
 import '../models/lyric_models.dart';
 import '../services/lyric_loader.dart';
 import '../widgets/lyric_widgets.dart';
+import '../services/ai_service.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -17,8 +18,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage>
-    with TickerProviderStateMixin {
+class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   // -----------------------------
   // 歌曲库
   // -----------------------------
@@ -31,6 +31,10 @@ class _PlayerPageState extends State<PlayerPage>
   SongModel? _song;
   final AudioPlayer _player = AudioPlayer();
   PlayerState _playerState = PlayerState.stopped;
+  Map<int, AiLineResult> _aiLineMap = {};
+  bool _aiAnalyzing = false;
+  String _aiMessage = 'AI尚未分析';
+  int _lastAiLineIndex = -1;
 
   Duration _position = Duration.zero;
   Duration _audioDuration = Duration.zero;
@@ -107,6 +111,10 @@ class _PlayerPageState extends State<PlayerPage>
 
       _effectCache.clear();
       _lastBeatIndex = -1;
+      _aiLineMap.clear();
+      _aiAnalyzing = false;
+      _aiMessage = 'AI尚未分析';
+      _lastAiLineIndex = -1;
 
       // 1) 读取歌词
       final song = await LyricLoader.loadFromAsset(preset.lyricAsset);
@@ -162,7 +170,9 @@ class _PlayerPageState extends State<PlayerPage>
 
   void _onPositionUpdate(Duration pos) {
     final sec = pos.inMilliseconds / 1000.0;
+
     _triggerBeatIfNeeded(sec);
+    _triggerAiLineIfNeeded(sec + _lyricsOffsetMs / 1000.0);
 
     setState(() {
       _position = pos;
@@ -205,6 +215,42 @@ class _PlayerPageState extends State<PlayerPage>
     return math.max(4.2, median * 2.8);
   }
 
+  Future<void> _analyzeCurrentSongWithAi() async {
+    final song = _song;
+    if (song == null) return;
+
+    if (_aiAnalyzing) return;
+    if (_aiLineMap.isNotEmpty) return;
+
+    setState(() {
+      _aiAnalyzing = true;
+      _aiMessage = 'AI正在分析整首歌词...';
+    });
+
+    try {
+      final result = await AiService.analyzeSong(song.lines);
+
+      if (!mounted) return;
+
+      setState(() {
+        _aiLineMap = result;
+        _aiAnalyzing = false;
+        _aiMessage = 'AI分析完成，播放时逐句联动';
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _aiAnalyzing = false;
+        _aiMessage = 'AI分析失败，继续使用原始歌词播放';
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('AI分析失败：$e')));
+    }
+  }
+
   Future<void> _togglePlay() async {
     if (!_audioPrepared) _audioPrepared = true;
 
@@ -213,8 +259,10 @@ class _PlayerPageState extends State<PlayerPage>
         await _player.pause();
       } else if (_playerState == PlayerState.paused ||
           _playerState == PlayerState.completed) {
+        await _analyzeCurrentSongWithAi();
         await _player.resume();
       } else {
+        await _analyzeCurrentSongWithAi();
         await _player.play(AssetSource(_presets[_presetIndex].audioAsset));
       }
     } catch (e) {
@@ -269,6 +317,28 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  void _triggerAiLineIfNeeded(double lyricSec) {
+    final song = _song;
+    if (song == null || song.lines.isEmpty) return;
+
+    final index = _findCurrentLineIndex(song.lines, lyricSec);
+    if (index < 0) return;
+
+    if (index == _lastAiLineIndex) return;
+    _lastAiLineIndex = index;
+
+    final ai = _aiLineMap[index];
+    if (ai == null) return;
+
+    if (ai.beat == 'strong' || ai.beat == 'normal') {
+      _beatController.forward(from: 0.0);
+
+      if (_vibrationEnabled) {
+        _vibrateIfEnabled();
+      }
+    }
+  }
+
   Future<void> _vibrateIfEnabled() async {
     if (!_vibrationEnabled) return;
 
@@ -308,10 +378,7 @@ class _PlayerPageState extends State<PlayerPage>
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Color(0xFF050816),
-              Color(0xFF0B1230),
-            ],
+            colors: [Color(0xFF050816), Color(0xFF0B1230)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -319,11 +386,12 @@ class _PlayerPageState extends State<PlayerPage>
         child: SafeArea(
           child: AnimatedBuilder(
             //animation: Listenable.merge([_beatController, _ellipsisController]),
-            animation: _ellipsisController,
+            animation: Listenable.merge([_beatController, _ellipsisController]),
             builder: (context, _) {
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  final compactLayout = constraints.maxWidth < 390 || constraints.maxHeight < 760;
+                  final compactLayout =
+                      constraints.maxWidth < 390 || constraints.maxHeight < 760;
 
                   return Padding(
                     padding: EdgeInsets.fromLTRB(
@@ -335,28 +403,30 @@ class _PlayerPageState extends State<PlayerPage>
                     child: _loading
                         ? _buildLoading()
                         : _errorText.isNotEmpty
-                            ? _buildError()
-                            : song == null
-                                ? _buildLoading()
-                                : Column(
-                                    children: [
-                                      _buildHeader(song, compactLayout),
-                                      SizedBox(height: compactLayout ? 8 : 12),
+                        ? _buildError()
+                        : song == null
+                        ? _buildLoading()
+                        : Column(
+                            children: [
+                              _buildHeader(song, compactLayout),
+                              SizedBox(height: compactLayout ? 8 : 10),
+                              _buildAiSyncPanel(song, compactLayout),
+                              SizedBox(height: compactLayout ? 8 : 12),
 
-                                      /// 中部歌词区尽量占大部分屏幕
-                                      Expanded(
-                                        child: Center(
-                                          child: _buildLyricStage(
-                                            song: song,
-                                            compactLayout: compactLayout,
-                                          ),
-                                        ),
-                                      ),
-
-                                      SizedBox(height: compactLayout ? 8 : 12),
-                                      _buildControls(compactLayout),
-                                    ],
+                              /// 中部歌词区尽量占大部分屏幕
+                              Expanded(
+                                child: Center(
+                                  child: _buildLyricStage(
+                                    song: song,
+                                    compactLayout: compactLayout,
                                   ),
+                                ),
+                              ),
+
+                              SizedBox(height: compactLayout ? 8 : 12),
+                              _buildControls(compactLayout),
+                            ],
+                          ),
                   );
                 },
               );
@@ -474,6 +544,67 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
+  Widget _buildAiSyncPanel(SongModel song, bool compactLayout) {
+    final index = _findCurrentLineIndex(song.lines, _lyricSeconds);
+
+    AiLineResult? ai;
+    if (index >= 0) {
+      ai = _aiLineMap[index];
+    }
+
+    final emotion = ai?.emotion ?? 0.5;
+    final beat = ai?.beat ?? 'normal';
+    final type = ai?.type ?? 'verse';
+
+    Color emotionColor;
+    if (emotion >= 0.7) {
+      emotionColor = Colors.redAccent;
+    } else if (emotion >= 0.4) {
+      emotionColor = Colors.orangeAccent;
+    } else {
+      emotionColor = Colors.blueAccent;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: compactLayout ? 12 : 14,
+        vertical: compactLayout ? 8 : 10,
+      ),
+      decoration: BoxDecoration(
+        color: emotionColor.withOpacity(ai == null ? 0.12 : 0.26),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: ai == null ? const Color(0xFF2B3140) : emotionColor,
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _aiAnalyzing ? 'AI正在分析歌词...' : _aiMessage,
+            style: TextStyle(
+              color: _aiAnalyzing ? Colors.orangeAccent : Colors.white70,
+              fontSize: compactLayout ? 12 : 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            index < 0
+                ? '等待歌词开始'
+                : '当前第 ${index + 1} 句  |  emotion: ${emotion.toStringAsFixed(2)}  |  beat: $beat  |  type: $type',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: compactLayout ? 12 : 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLyricStage({
     required SongModel song,
     required bool compactLayout,
@@ -490,7 +621,7 @@ class _PlayerPageState extends State<PlayerPage>
     return LyricDualSlotStage(
       song: song,
       lyricTime: _lyricSeconds,
-      beatPulse: 0.0,
+      beatPulse: _beatPulse,
       effectCache: _effectCache,
       motionPreset: _motionPreset,
       compactLayout: compactLayout,
@@ -550,7 +681,9 @@ class _PlayerPageState extends State<PlayerPage>
                     thumbColor: const Color(0xFF9A6CFF),
                     overlayColor: const Color(0x3367D9FF),
                     trackHeight: compactLayout ? 3.8 : 4.5,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 7,
+                    ),
                   ),
                   child: Slider(
                     value: sliderValue,
@@ -575,7 +708,10 @@ class _PlayerPageState extends State<PlayerPage>
                   });
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 2,
+                  ),
                   child: Row(
                     children: [
                       const Text(
@@ -614,10 +750,7 @@ class _PlayerPageState extends State<PlayerPage>
                 children: [
                   const Text(
                     '震动',
-                    style: TextStyle(
-                      color: Color(0xFFA7B6D6),
-                      fontSize: 13,
-                    ),
+                    style: TextStyle(color: Color(0xFFA7B6D6), fontSize: 13),
                   ),
                   const SizedBox(width: 8),
                   Switch.adaptive(
@@ -721,12 +854,7 @@ class _PlayerPageState extends State<PlayerPage>
     required bool compactLayout,
   }) {
     final bg = primary
-        ? const LinearGradient(
-            colors: [
-              Color(0xFF67D9FF),
-              Color(0xFF9A6CFF),
-            ],
-          )
+        ? const LinearGradient(colors: [Color(0xFF67D9FF), Color(0xFF9A6CFF)])
         : null;
 
     return InkWell(
@@ -764,10 +892,7 @@ class _PlayerPageState extends State<PlayerPage>
         children: [
           CircularProgressIndicator(),
           SizedBox(height: 14),
-          Text(
-            '正在读取歌词和音频…',
-            style: TextStyle(color: Color(0xFFA7B6D6)),
-          ),
+          Text('正在读取歌词和音频…', style: TextStyle(color: Color(0xFFA7B6D6))),
         ],
       ),
     );
@@ -785,10 +910,7 @@ class _PlayerPageState extends State<PlayerPage>
         ),
         child: Text(
           _errorText,
-          style: const TextStyle(
-            color: Color(0xFFFFB4B4),
-            height: 1.45,
-          ),
+          style: const TextStyle(color: Color(0xFFFFB4B4), height: 1.45),
         ),
       ),
     );

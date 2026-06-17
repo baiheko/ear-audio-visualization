@@ -1,0 +1,115 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import '../services/song_service.dart';
+import '../models/song_model.dart';
+
+class MusicPage extends StatefulWidget {
+  const MusicPage({super.key});
+
+  @override
+  State<MusicPage> createState() => _MusicPageState();
+}
+
+class _MusicPageState extends State<MusicPage> {
+  SongData? songData;
+  int currentIndex = 0;
+  Timer? timer;
+
+  @override
+  void initState() {
+    super.initState();
+    loadData();
+  }
+
+  void loadData() async {
+    songData = await SongService.loadSong();
+
+    setState(() {});
+
+    startPlay();
+  }
+
+  void startPlay() {
+    timer = Timer.periodic(const Duration(seconds: 2), (t) {
+      if (songData == null) return;
+
+      setState(() {
+        currentIndex++;
+
+        if (currentIndex >= songData!.lines.length) {
+          currentIndex = 0; // 循环播放
+        }
+      });
+    });
+  }
+
+  Color getEmotionColor(double emotion) {
+    if (emotion > 0.7) return Colors.redAccent;
+    if (emotion > 0.4) return Colors.orange;
+    return Colors.blueAccent;
+  }
+
+  double getScale(String beat) {
+    switch (beat) {
+      case "strong":
+        return 1.3;
+      case "normal":
+        return 1.0;
+      default:
+        return 0.85;
+    }
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (songData == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: ListView.builder(
+          itemCount: songData!.lines.length,
+          itemBuilder: (context, index) {
+            final line = songData!.lines[index];
+
+            bool isActive = index == currentIndex;
+
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 500),
+              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              padding: const EdgeInsets.all(12),
+              transform: Matrix4.identity()
+                ..scale(isActive ? getScale(line.beat) : 0.9),
+
+              decoration: BoxDecoration(
+                color: isActive
+                    ? getEmotionColor(line.emotion)
+                    : Colors.grey.shade900,
+                borderRadius: BorderRadius.circular(12),
+              ),
+
+              child: Text(
+                line.text,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isActive ? 22 : 16,
+                  fontWeight: line.type == "chorus"
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
