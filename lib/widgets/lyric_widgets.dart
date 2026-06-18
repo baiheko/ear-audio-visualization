@@ -160,18 +160,23 @@ class LyricLineCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final lineEmotion = _normalizeEmotion(line.emotion);
+
     final baseBorder = const Color(0xFF2B3140);
     final accentBorder = const Color(0xFF67D9FF);
+
+    /// emotion 只轻微影响边框亮度，不改变大色相
     final borderColor = Color.lerp(
       baseBorder,
       accentBorder,
-      beatPulse * 0.28,
-    ) ?? baseBorder;
+      0.12 + lineEmotion * 0.45 + beatPulse * 0.18,
+    )!;
 
+    /// emotion 越强，背景稍微更“有气场”，但变化很克制
     final cardBg = Color.lerp(
       const Color(0xFF0B1220),
-      const Color(0xFF10243D),
-      beatPulse * 0.10,
+      const Color(0xFF112B45),
+      lineEmotion * 0.18 + beatPulse * 0.08,
     )!;
 
     final labelStyle = theme.textTheme.labelMedium?.copyWith(
@@ -296,102 +301,121 @@ class LyricLineCard extends StatelessWidget {
   /// 这版已经去掉了 pitch / volume 的视觉影响，
   /// 只保留：时间、动画风格、轻微强调、保留已出现的字。
   LyricCharEffect _buildCharEffect({
-    required LyricChar char,
-    required double currentTime,
-    required double baseFontSize,
-    required double beatPulse,
-    required bool settled,
-  }) {
-    final intensity = motionPreset.intensity;
+  required LyricChar char,
+  required double currentTime,
+  required double baseFontSize,
+  required double beatPulse,
+  required bool settled,
+}) {
+  final intensity = motionPreset.intensity;
 
-    // 完成态：整行已经播完并固定显示
-    if (settled) {
-      return LyricCharEffect(
-        opacity: 0.88,
-        scale: 1.0,
-        translateX: 0,
-        translateY: 0,
-        fontSize: baseFontSize * 0.98,
-        color: const Color(0xFFF3F7FF).withOpacity(0.90),
-        glow: 0.0,
-      );
-    }
+  /// 当前字对应的 emotion：
+  /// 优先用字自己的 emotion，没有就用整行 emotion。
+  final emotion = _normalizeEmotion(char.emotion ?? line.emotion);
 
-    // 还没到预进入窗口：隐藏
-    final preEnterStart = char.start - leadInSeconds;
-    if (currentTime < preEnterStart) {
-      return LyricCharEffect(
-        opacity: 0.0,
-        scale: 0.98,
-        translateX: 0,
-        translateY: 4,
-        fontSize: baseFontSize,
-        color: const Color(0xFFF3F7FF),
-        glow: 0.0,
-      );
-    }
+  /// emotion 越高，颜色越“浓”，但只在同一色系里做变化
+  final baseTextColor = _emotionTextColor(
+    emotion: emotion,
+    active: false,
+    beatPulse: beatPulse,
+  );
 
-    final duration = math.max(char.end - char.start, 0.12);
-    final appearSpan = math.max(
-      0.06,
-      duration * (0.30 + (1.0 - intensity) * 0.12),
-    );
+  final activeTextColor = _emotionTextColor(
+    emotion: emotion,
+    active: true,
+    beatPulse: beatPulse,
+  );
 
-    // 预进入：先轻轻浮现，不要“蹦”
-    if (currentTime < char.start) {
-      final preProgress = _easeOutCubic(
-        _clamp((currentTime - preEnterStart) / leadInSeconds, 0.0, 1.0),
-      );
+  final glowStrength =
+    0.12 +
+    emotion * 0.40 +
+    beatPulse * 0.20;
 
-      return LyricCharEffect(
-        opacity: 0.08 + 0.26 * preProgress,
-        scale: 0.98 + 0.015 * preProgress,
-        translateX: preProgress * (2.2 * intensity),
-        translateY: 0,
-        fontSize: baseFontSize * (0.99 + 0.01 * preProgress),
-        color: const Color(0xFFF3F7FF).withOpacity(0.78),
-        glow: 0.0,
-      );
-    }
-
-    // 正在唱：轻微强调
-    if (currentTime <= char.end) {
-      final appearProgress = _easeOutCubic(
-        _clamp((currentTime - char.start) / appearSpan, 0.0, 1.0),
-      );
-
-      final activeProgress = _clamp((currentTime - char.start) / duration, 0.0, 1.0);
-      final driftMaxX = _clamp(3.0 + duration * 8.0 * intensity, 3.0, 12.0);
-      final driftX = _easeOutCubic(activeProgress) * driftMaxX;
-
-      return LyricCharEffect(
-        opacity: 0.42 + 0.58 * appearProgress,
-        scale: 1.0 + 0.015 * intensity,
-        translateX: driftX,
-        translateY: 0,
-        fontSize: baseFontSize * (1.0 + 0.012 * intensity),
-        color: Color.lerp(
-              const Color(0xFFF3F7FF),
-              const Color(0xFF67D9FF),
-              0.18 + beatPulse * 0.10,
-            ) ??
-            const Color(0xFFF3F7FF),
-        glow: 0.16 + beatPulse * 0.32 * intensity,
-      );
-    }
-
-    // 已唱完：一直保留，不消失
+  // 完成态：整行已经播完并固定显示
+  if (settled) {
     return LyricCharEffect(
-      opacity: 1.0,
+      opacity: 0.88,
       scale: 1.0,
-      translateX: 0.0,
-      translateY: 0.0,
-      fontSize: baseFontSize,
-      color: const Color(0xFFF3F7FF).withOpacity(0.90),
+      translateX: 0,
+      translateY: 0,
+      fontSize: baseFontSize * 0.98,
+      color: baseTextColor.withOpacity(0.92),
       glow: 0.0,
     );
   }
+
+  // 还没到预进入窗口：隐藏
+  final preEnterStart = char.start - leadInSeconds;
+  if (currentTime < preEnterStart) {
+    return LyricCharEffect(
+      opacity: 0.0,
+      scale: 0.98,
+      translateX: 0,
+      translateY: 4,
+      fontSize: baseFontSize,
+      color: baseTextColor.withOpacity(0.75),
+      glow: 0.0,
+    );
+  }
+
+  final duration = math.max(char.end - char.start, 0.12);
+  final appearSpan = math.max(
+    0.06,
+    duration * (0.30 + (1.0 - intensity) * 0.12),
+  );
+
+  // 预进入：先轻轻浮现，不要“蹦”
+  if (currentTime < char.start) {
+    final preProgress = _easeOutCubic(
+      _clamp((currentTime - preEnterStart) / leadInSeconds, 0.0, 1.0),
+    );
+
+    return LyricCharEffect(
+      opacity: 0.08 + 0.26 * preProgress,
+      scale: 0.98 + 0.015 * preProgress,
+      translateX: preProgress * (2.2 * intensity),
+      translateY: 0,
+      fontSize: baseFontSize * (0.99 + 0.01 * preProgress),
+      color: baseTextColor.withOpacity(0.65 + 0.15 * preProgress),
+      glow: 0.0,
+    );
+  }
+
+  // 正在唱：轻微强调
+  if (currentTime <= char.end) {
+    final appearProgress = _easeOutCubic(
+      _clamp((currentTime - char.start) / appearSpan, 0.0, 1.0),
+    );
+
+    final activeProgress = _clamp((currentTime - char.start) / duration, 0.0, 1.0);
+    final driftMaxX = _clamp(3.0 + duration * 8.0 * intensity, 3.0, 12.0);
+    final driftX = _easeOutCubic(activeProgress) * driftMaxX;
+
+    return LyricCharEffect(
+      opacity: 0.42 + 0.58 * appearProgress,
+      scale: 1.0 + 0.015 * intensity,
+      translateX: driftX,
+      translateY: 0,
+      fontSize: baseFontSize * (1.0 + 0.012 * intensity),
+      color: activeTextColor,
+      glow: glowStrength,
+    );
+  }
+
+  // 已唱完：一直保留，不消失
+  // emotion 高一点的字，完成后也保持略微更“浓”
+  return LyricCharEffect(
+    opacity: 1.0,
+    scale: 1.0,
+    translateX: 0.0,
+    translateY: 0.0,
+    fontSize: baseFontSize,
+    color: baseTextColor.withOpacity(0.90 + emotion * 0.06),
+    glow: 0.0,
+  );
 }
+
+  }
 
 /// 双槽歌词舞台
 ///
@@ -826,3 +850,62 @@ double _easeOutCubic(double t) {
 }
 
 double lerpDouble(double a, double b, double t) => a + (b - a) * t;
+
+double _normalizeEmotion(dynamic v) {
+  if (v == null || v == '') return 0.0;
+
+  if (v is num) {
+    final d = v.toDouble();
+    if (d < 0) return 0.0;
+    if (d > 1) return 1.0;
+    return d;
+  }
+
+  final parsed = double.tryParse(v.toString());
+  if (parsed == null) return 0.0;
+  return _clamp(parsed, 0.0, 1.0);
+}
+
+Color _emotionTextColor({
+  required double emotion,
+  required bool active,
+  required double beatPulse,
+}) {
+  final e = _clamp(emotion, 0.0, 1.0);
+
+  /// emotion=0
+  const lowColor = Color(0xFFF4F7FF);
+
+  /// emotion=0.5
+  const midColor = Color(0xFF9EDCFF);
+
+  /// emotion=1
+  const highColor = Color(0xFF67D9FF);
+
+  Color result;
+
+  if (e < 0.5) {
+    result = Color.lerp(
+      lowColor,
+      midColor,
+      e * 2,
+    )!;
+  } else {
+    result = Color.lerp(
+      midColor,
+      highColor,
+      (e - 0.5) * 2,
+    )!;
+  }
+
+  /// 当前字额外增强
+  if (active) {
+    result = Color.lerp(
+      result,
+      Colors.white,
+      0.15 + beatPulse * 0.10,
+    )!;
+  }
+
+  return result;
+}
