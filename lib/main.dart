@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'pages/main_page.dart'; // 导入主页面
 import 'pages/player_page.dart';
 
 void main() {
@@ -14,8 +15,15 @@ class EarApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: '易耳',
-      theme: ThemeData.dark(useMaterial3: true),
-      home: const PlayerPage(),
+      theme: ThemeData.dark(useMaterial3: true).copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0B0E14),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0B0E14),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+      ),
+      home: const YiErMainWindow(), // 改为主页面作为入口
     );
   }
 }

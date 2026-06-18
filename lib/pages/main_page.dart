@@ -1,18 +1,5 @@
 import 'package:flutter/material.dart';
-
-void main() => runApp(const YiErApp());
-
-class YiErApp extends StatelessWidget {
-  const YiErApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: const YiErMainWindow(),
-      debugShowCheckedModeBanner: false,
-    );
-  }
-}
+import 'player_page.dart'; // 导入播放页面
 
 class YiErMainWindow extends StatelessWidget {
   const YiErMainWindow({super.key});
@@ -20,7 +7,6 @@ class YiErMainWindow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E14),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -42,10 +28,17 @@ class YiErMainWindow extends StatelessWidget {
                 ),
                 const SizedBox(height: 25),
                 
-                const ModernCard(
+                // 点击"开始体验"跳转到播放页面
+                ModernCard(
                   title: "开始体验 (现场模式)",
                   desc: "实时同步歌词与氛围反馈",
                   icon: "🎵",
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const PlayerPage()),
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 const ModernCard(
@@ -54,7 +47,6 @@ class YiErMainWindow extends StatelessWidget {
                   icon: "💬",
                 ),
                 const SizedBox(height: 20),
-
                 Row(
                   children: const [
                     Expanded(child: ModernCard(title: "教学指南", icon: "🎓", isSmall: true)),
@@ -72,11 +64,13 @@ class YiErMainWindow extends StatelessWidget {
   }
 }
 
+// 改造后的可点击卡片组件
 class ModernCard extends StatelessWidget {
   final String title;
   final String? desc;
   final String icon;
   final bool isSmall;
+  final VoidCallback? onTap;
 
   const ModernCard({
     super.key,
@@ -84,12 +78,13 @@ class ModernCard extends StatelessWidget {
     this.desc,
     required this.icon,
     this.isSmall = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => debugPrint("点击了 $title"),
+      onTap: onTap ?? () => debugPrint("点击了 $title"),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),

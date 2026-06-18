@@ -17,6 +17,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
+
 class _PlayerPageState extends State<PlayerPage>
     with TickerProviderStateMixin {
   // -----------------------------
@@ -305,6 +306,17 @@ class _PlayerPageState extends State<PlayerPage>
     final song = _song;
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('现场模式'),
+        // 可选：自定义返回按钮样式
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios),
+          onPressed: () {
+            // 手动返回上一页，和系统返回箭头效果完全一致
+            Navigator.pop(context);
+          },
+        ),
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
