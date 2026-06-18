@@ -502,7 +502,7 @@ class _PlayerPageState extends State<PlayerPage>
     return LyricDualSlotStage(
       song: song,
       lyricTime: _lyricSeconds,
-      beatPulse: 0.0,
+      beatPulse: 0.0, // _beatPulse,
       effectCache: _effectCache,
       motionPreset: _motionPreset,
       compactLayout: compactLayout,
