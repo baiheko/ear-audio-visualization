@@ -495,7 +495,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (lyricIndex < 0) {
       return const EmptyStageCard(
         title: '准备开始',
-        subtitle: '播放后，歌词会按时间平滑出现。\n你也可以先调整歌词偏移。',
+        subtitle: '歌词颜色的深浅\n带您感受音乐的情感',
       );
     }
 

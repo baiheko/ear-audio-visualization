@@ -95,7 +95,7 @@ const demoSongPresets = <SongPreset>[
     id: 'sasanohani',
     title: 'ささのはに、うたかたに。',
     artist: 'M・A・O,中澤ミナ,森下来奈',
-    lyricAsset: 'assets/lyrics/ささのはに、うたかたに_with_beats.json',
+    lyricAsset: 'assets/lyrics/ささのはに、うたかたに_with_emotion.json',
     audioAsset: 'audio/ささのはに、うたかたに.flac',
     defaultOffsetMs: 0,
     defaultMotion: LyricMotionPreset.soft,
