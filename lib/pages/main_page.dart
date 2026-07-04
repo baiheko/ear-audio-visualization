@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'player_page.dart'; // 导入播放页面
+import 'ai_chat_page.dart';
+import 'player_page.dart';
+import 'guide_page.dart';
+import 'settings_page.dart';
 
 class YiErMainWindow extends StatelessWidget {
   const YiErMainWindow({super.key});
@@ -28,7 +31,7 @@ class YiErMainWindow extends StatelessWidget {
                 ),
                 const SizedBox(height: 25),
                 
-                // 点击"开始体验"跳转到播放页面
+                // 开始体验
                 ModernCard(
                   title: "开始体验 (现场模式)",
                   desc: "实时同步歌词与氛围反馈",
@@ -41,17 +44,47 @@ class YiErMainWindow extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 12),
-                const ModernCard(
+                
+                // AI 问答助手（只保留这一个）
+                ModernCard(
                   title: "AI 问答助手",
                   desc: "智能解析现场环境状态",
                   icon: "💬",
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const AiChatPage()),
+                    );
+                  },
                 ),
                 const SizedBox(height: 20),
+                
+                // 教学指南 + 系统设置（只保留这一个）
                 Row(
-                  children: const [
-                    Expanded(child: ModernCard(title: "教学指南", icon: "🎓", isSmall: true)),
-                    SizedBox(width: 12),
-                    Expanded(child: ModernCard(title: "系统设置", icon: "⚙️", isSmall: true)),
+                  children: [
+                    Expanded(
+                      child: ModernCard(
+                        title: "教学指南",
+                        icon: "🎓",
+                        isSmall: true,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const GuidePage()),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ModernCard(
+                        title: "系统设置",
+                        icon: "⚙️",
+                        isSmall: true,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const SettingsPage()),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 30),
@@ -64,7 +97,7 @@ class YiErMainWindow extends StatelessWidget {
   }
 }
 
-// 改造后的可点击卡片组件
+// 卡片组件
 class ModernCard extends StatelessWidget {
   final String title;
   final String? desc;
