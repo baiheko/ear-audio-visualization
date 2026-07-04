@@ -82,6 +82,16 @@ class SongPreset {
 /// 这里先把当前这首歌放进去，后面你每加一首歌，只要在这里新增一项就行。
 const demoSongPresets = <SongPreset>[
   SongPreset(
+    id: 'gaobaiqiqiu',
+    title: '告白气球',
+    artist: '周杰伦',
+    lyricAsset: 'assets/lyrics/gaobaiqiqiu.json',
+    audioAsset: 'audio/告白气球 - 周杰伦.flac',
+    defaultOffsetMs: 2,
+    defaultMotion: LyricMotionPreset.normal,
+  ),
+
+  SongPreset(
     id: 'sasanohani',
     title: 'ささのはに、うたかたに。',
     artist: 'M・A・O,中澤ミナ,森下来奈',
@@ -98,16 +108,6 @@ const demoSongPresets = <SongPreset>[
     lyricAsset: 'assets/lyrics/届かない恋_with_beats.json',
     audioAsset: 'audio/上原れな - 届かない恋.flac',
     defaultOffsetMs: 1,
-    defaultMotion: LyricMotionPreset.normal,
-  ),
-
-  SongPreset(
-    id: 'gaobaiqiqiu',
-    title: '告白气球',
-    artist: '周杰伦',
-    lyricAsset: 'assets/lyrics/gaobaiqiqiu.json',
-    audioAsset: 'audio/告白气球 - 周杰伦.flac',
-    defaultOffsetMs: 2,
     defaultMotion: LyricMotionPreset.normal,
   ),
 
