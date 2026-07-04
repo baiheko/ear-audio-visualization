@@ -1,8 +1,4 @@
-enum LyricMotionPreset {
-  soft,
-  normal,
-  strong,
-}
+enum LyricMotionPreset { soft, normal, strong }
 
 extension LyricMotionPresetX on LyricMotionPreset {
   String get label {
@@ -85,8 +81,8 @@ const demoSongPresets = <SongPreset>[
     id: 'sasanohani',
     title: 'ささのはに、うたかたに。',
     artist: 'M・A・O,中澤ミナ,森下来奈',
-    lyricAsset: 'assets/lyrics/ささのはに、うたかたに.json',
-    audioAsset: 'audio/ささのはに、うたかたに.flac',
+    lyricAsset: 'assets/lyrics/ささのはに、うたかたに_with_emotion.json',
+    audioAsset: 'audio/song_01.flac',
     defaultOffsetMs: 0,
     defaultMotion: LyricMotionPreset.soft,
   ),
@@ -131,8 +127,6 @@ const demoSongPresets = <SongPreset>[
     defaultMotion: LyricMotionPreset.normal,
   ),
 
-
-
   // 以后加新歌就照着这个格式往下写：
   // SongPreset(
   //   id: 'xxx',
@@ -143,7 +137,6 @@ const demoSongPresets = <SongPreset>[
   //   defaultOffsetMs: 0,
   //   defaultMotion: LyricMotionPreset.normal,
   // ),
-
   SongPreset(
     id: 'いきづらい部！',
     title: "いきづらい部！",
@@ -173,5 +166,4 @@ const demoSongPresets = <SongPreset>[
     defaultOffsetMs: 0,
     defaultMotion: LyricMotionPreset.normal,
   ),
-
 ];

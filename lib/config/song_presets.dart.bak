@@ -86,7 +86,7 @@ const demoSongPresets = <SongPreset>[
     title: 'ささのはに、うたかたに。',
     artist: 'M・A・O,中澤ミナ,森下来奈',
     lyricAsset: 'assets/lyrics/ささのはに、うたかたに.json',
-    audioAsset: 'audio/ささのはに、うたかたに.flac',
+    audioAsset: 'audio/song_01.flac',
     defaultOffsetMs: 0,
     defaultMotion: LyricMotionPreset.soft,
   ),

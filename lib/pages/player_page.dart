@@ -9,7 +9,6 @@ import '../config/song_presets.dart';
 import '../models/lyric_models.dart';
 import '../services/lyric_loader.dart';
 import '../widgets/lyric_widgets.dart';
-import '../services/ai_service.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -31,10 +30,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   SongModel? _song;
   final AudioPlayer _player = AudioPlayer();
   PlayerState _playerState = PlayerState.stopped;
-  Map<int, AiLineResult> _aiLineMap = {};
-  bool _aiAnalyzing = false;
-  String _aiMessage = 'AI尚未分析';
-  int _lastAiLineIndex = -1;
+  // 歌词 emotion 已由离线 Python 工具预处理并写入 JSON。
+  // 播放时不再请求 AI 服务。
 
   Duration _position = Duration.zero;
   Duration _audioDuration = Duration.zero;
@@ -111,10 +108,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
 
       _effectCache.clear();
       _lastBeatIndex = -1;
-      _aiLineMap.clear();
-      _aiAnalyzing = false;
-      _aiMessage = 'AI尚未分析';
-      _lastAiLineIndex = -1;
 
       // 1) 读取歌词
       final song = await LyricLoader.loadFromAsset(preset.lyricAsset);
@@ -172,7 +165,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     final sec = pos.inMilliseconds / 1000.0;
 
     _triggerBeatIfNeeded(sec);
-    _triggerAiLineIfNeeded(sec + _lyricsOffsetMs / 1000.0);
 
     setState(() {
       _position = pos;
@@ -215,42 +207,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     return math.max(4.2, median * 2.8);
   }
 
-  Future<void> _analyzeCurrentSongWithAi() async {
-    final song = _song;
-    if (song == null) return;
-
-    if (_aiAnalyzing) return;
-    if (_aiLineMap.isNotEmpty) return;
-
-    setState(() {
-      _aiAnalyzing = true;
-      _aiMessage = 'AI正在分析整首歌词...';
-    });
-
-    try {
-      final result = await AiService.analyzeSong(song.lines);
-
-      if (!mounted) return;
-
-      setState(() {
-        _aiLineMap = result;
-        _aiAnalyzing = false;
-        _aiMessage = 'AI分析完成，播放时逐句联动';
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _aiAnalyzing = false;
-        _aiMessage = 'AI分析失败，继续使用原始歌词播放';
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('AI分析失败：$e')));
-    }
-  }
-
   Future<void> _togglePlay() async {
     if (!_audioPrepared) _audioPrepared = true;
 
@@ -259,10 +215,8 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         await _player.pause();
       } else if (_playerState == PlayerState.paused ||
           _playerState == PlayerState.completed) {
-        await _analyzeCurrentSongWithAi();
         await _player.resume();
       } else {
-        await _analyzeCurrentSongWithAi();
         await _player.play(AssetSource(_presets[_presetIndex].audioAsset));
       }
     } catch (e) {
@@ -314,28 +268,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
       _lastBeatIndex = latestBeatIndex;
       _beatController.forward(from: 0.0);
       _vibrateIfEnabled();
-    }
-  }
-
-  void _triggerAiLineIfNeeded(double lyricSec) {
-    final song = _song;
-    if (song == null || song.lines.isEmpty) return;
-
-    final index = _findCurrentLineIndex(song.lines, lyricSec);
-    if (index < 0) return;
-
-    if (index == _lastAiLineIndex) return;
-    _lastAiLineIndex = index;
-
-    final ai = _aiLineMap[index];
-    if (ai == null) return;
-
-    if (ai.beat == 'strong' || ai.beat == 'normal') {
-      _beatController.forward(from: 0.0);
-
-      if (_vibrationEnabled) {
-        _vibrateIfEnabled();
-      }
     }
   }
 
@@ -544,17 +476,26 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     );
   }
 
+  String _beatFromEmotion(double emotion) {
+    if (emotion >= 0.72) return 'strong';
+    if (emotion >= 0.42) return 'normal';
+    return 'soft';
+  }
+
+  String _typeFromEmotion(double emotion) {
+    if (emotion >= 0.78) return '高潮';
+    if (emotion >= 0.58) return '抒情';
+    return '平缓';
+  }
+
   Widget _buildAiSyncPanel(SongModel song, bool compactLayout) {
     final index = _findCurrentLineIndex(song.lines, _lyricSeconds);
 
-    AiLineResult? ai;
-    if (index >= 0) {
-      ai = _aiLineMap[index];
-    }
-
-    final emotion = ai?.emotion ?? 0.5;
-    final beat = ai?.beat ?? 'normal';
-    final type = ai?.type ?? 'verse';
+    final emotion = index >= 0
+        ? (song.lines[index].emotion ?? 0.5)
+        : 0.5;
+    final beat = _beatFromEmotion(emotion);
+    final type = _typeFromEmotion(emotion);
 
     Color emotionColor;
     if (emotion >= 0.7) {
@@ -572,10 +513,10 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         vertical: compactLayout ? 8 : 10,
       ),
       decoration: BoxDecoration(
-        color: emotionColor.withOpacity(ai == null ? 0.12 : 0.26),
+        color: emotionColor.withOpacity(0.26),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: ai == null ? const Color(0xFF2B3140) : emotionColor,
+          color: emotionColor,
           width: 1.2,
         ),
       ),
@@ -583,9 +524,9 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _aiAnalyzing ? 'AI正在分析歌词...' : _aiMessage,
+            '已加载预处理的歌词情绪数据',
             style: TextStyle(
-              color: _aiAnalyzing ? Colors.orangeAccent : Colors.white70,
+              color: Colors.white70,
               fontSize: compactLayout ? 12 : 13,
               fontWeight: FontWeight.w600,
             ),
@@ -594,7 +535,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
           Text(
             index < 0
                 ? '等待歌词开始'
-                : '当前第 ${index + 1} 句  |  emotion: ${emotion.toStringAsFixed(2)}  |  beat: $beat  |  type: $type',
+                : '当前第 ${index + 1} 句  |  emotion: ${emotion.toStringAsFixed(2)}  |  beat: $beat  |  状态: $type',
             style: TextStyle(
               color: Colors.white,
               fontSize: compactLayout ? 12 : 13,
